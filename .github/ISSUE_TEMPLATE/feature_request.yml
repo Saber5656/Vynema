@@ -7,7 +7,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        vynema is pre-alpha. Please keep proposals scoped and avoid sharing secrets or private data.
+        Vynema is pre-alpha. Please keep proposals scoped and avoid sharing secrets or private data.
   - type: textarea
     id: problem
     attributes:

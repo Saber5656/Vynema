@@ -5,12 +5,12 @@ Date: 2026-06-18
 Candidate:
 
 ```text
-vynema
+Vynema
 ```
 
 ## Result
 
-`vynema` is approved as the working product and repository name for this pre-alpha OSS project.
+`Vynema` is approved as the working product and repository name for this pre-alpha OSS project.
 
 This is not a trademark clearance or legal review.
 If the project moves beyond experimental OSS, run a separate trademark and domain review.
@@ -20,7 +20,7 @@ If the project moves beyond experimental OSS, run a separate trademark and domai
 | Surface | Result | Note |
 |---|---|---|
 | GitHub repository search | Low collision | GitHub API search for `vynema in:name` returned one close match, `ntando-deeev/vynemarket`, and no exact `vynema` repository in the visible result set. |
-| GitHub `Saber5656/vynema` | Available by API check | `https://api.github.com/repos/Saber5656/vynema` returned `404` at check time. |
+| GitHub `Saber5656/Vynema` | Adopted | The repository now uses `Saber5656/Vynema`. |
 | GitHub user/org `vynema` | No visible exact account | `https://api.github.com/users/vynema` returned `404` at check time. |
 | npm package `vynema` | No exact package found | `https://registry.npmjs.org/vynema` returned `404` at check time. |
 | PyPI package `vynema` | No exact package found | `https://pypi.org/pypi/vynema/json` returned `404` at check time. |
@@ -32,12 +32,11 @@ Use:
 
 | Use | Name |
 |---|---|
-| Product | `vynema` |
-| Repository | `vynema` |
+| Product | `Vynema` |
+| Repository | `Vynema` |
 | Future package or CLI | `vynema` |
 
 ## Follow-up
 
-- Rename the GitHub repository before switching to public visibility if possible.
-- Update local `origin` after the GitHub repository rename.
+- Keep local `origin` pointed at `git@github.com:Saber5656/Vynema.git`.
 - Keep historical `AI-Theater` references only in private notes or clearly marked historical material.
