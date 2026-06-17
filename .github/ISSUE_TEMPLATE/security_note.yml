@@ -1,0 +1,25 @@
+name: Security note
+description: Ask a non-sensitive security question or report a low-risk concern.
+title: "[Security]: "
+labels:
+  - security
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not include exploit details, secrets, credentials, tokens, private keys, or personal data.
+        For sensitive vulnerabilities, follow SECURITY.md instead of filing a public issue.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: Describe the concern at a high level only.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Potential impact
+      description: Do not include exploit steps if this is sensitive.
+    validations:
+      required: false
