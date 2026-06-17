@@ -1,6 +1,6 @@
 # Public Content Audit
 
-This audit tracks repository content that must be reviewed before vynema is made public.
+This audit tracks repository content that must be reviewed before Vynema is made public.
 
 Public repository visibility is not a release, but public visibility still exposes all tracked files and history.
 Do not change repository visibility until all `blocker` items are resolved.
@@ -15,8 +15,9 @@ Do not change repository visibility until all `blocker` items are resolved.
 | PR target | Protected `main` |
 | Release trigger | Explicit tag, GitHub Release, protected environment approval, or release workflow |
 | License | MIT |
-| Product name | `vynema` |
-| Repository name | `vynema` planned |
+| Product name | `Vynema` |
+| Repository name | `Vynema` |
+| Visibility | Public |
 
 ## Resolved Blockers
 
@@ -51,9 +52,9 @@ Do not change repository visibility until all `blocker` items are resolved.
 | `.github/pull_request_template.md` | Adds PR safety checklist. |
 | `.github/ISSUE_TEMPLATE/` | Adds structured public issue intake and points sensitive reports to security policy. |
 | `.gitignore` | Blocks local secrets, keys, build outputs, logs, and temporary files from future commits. |
-| `docs/publication/name-collision-check.md` | Records the initial `vynema` naming collision check. |
+| `docs/publication/name-collision-check.md` | Records the initial `Vynema` naming collision check. |
 | `docs/publication/github-hardening-next-steps.md` | Records dry-run GitHub rename and hardening steps; no mutation executed. |
-| `PROJECT-STATUS.md` | Rewritten as the current `vynema` pre-alpha status page. |
+| `PROJECT-STATUS.md` | Rewritten as the current `Vynema` pre-alpha status page. |
 | `docs/requirements/vynema-mvp-requirements.md` | Current MVP requirements baseline. |
 | `docs/architecture/vynema-architecture.md` | Current architecture baseline. |
 | `docs/archive/v1/README.md` | Marks historical v1 docs as non-current reference material. |
@@ -80,5 +81,5 @@ Continue cleanup in this order:
 
 1. Run a dedicated secret scanner if available.
 2. Apply GitHub-side hardening settings.
-3. Rename the GitHub repository to `vynema` before public visibility if possible.
-4. Commit baseline cleanup before any GitHub visibility change.
+3. Keep repository rulesets and security settings aligned with `Saber5656/Vynema`.
+4. Commit baseline cleanup before any release or package publication.

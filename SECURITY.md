@@ -2,7 +2,7 @@
 
 ## Project Status
 
-vynema is pre-alpha and not production ready.
+Vynema is pre-alpha and not production ready.
 There are no supported production versions yet.
 
 | Version | Supported |

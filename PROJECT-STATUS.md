@@ -1,10 +1,10 @@
-# vynema Project Status
+# Vynema Project Status
 
 Last updated: 2026-06-18
 
 ## Overview
 
-`vynema` is a pre-alpha OSS project for an AI-agent-published video platform.
+`Vynema` is a pre-alpha OSS project for an AI-agent-published video platform.
 
 The current product direction is:
 
@@ -18,9 +18,9 @@ The current product direction is:
 
 | Area | Status |
 |---|---|
-| Product name | `vynema` approved |
-| Repository name | `vynema` planned |
-| Repository visibility | Private while public-readiness cleanup is in progress |
+| Product name | `Vynema` approved |
+| Repository name | `Vynema` |
+| Repository visibility | Public |
 | License | MIT |
 | Release posture | No release, package publish, or hosted service yet |
 | Default branch | `main` |
@@ -32,10 +32,10 @@ The current product direction is:
 | Workstream | Status | Notes |
 |---|---|---|
 | Public OSS baseline | In progress | README, LICENSE, SECURITY, CONTRIBUTING, CODEOWNERS, issue templates, and PR template have been prepared. |
-| Repository naming | In progress | `vynema` collision check is recorded in `docs/publication/name-collision-check.md`. |
+| Repository naming | Done | `Vynema` collision check is recorded in `docs/publication/name-collision-check.md`. |
 | Public content cleanup | In progress | AI-DLC, Claude-specific, temporary, project-local skill files, and v1-only helper scripts have been removed or archived from active public scope. |
-| GitHub hardening | Pending | Rulesets, Actions permissions, Dependabot, CodeQL, and secret scanning still need GitHub-side setup. |
-| Current requirements | Pending | Historical v1 requirements must be superseded by current `vynema` requirements. |
+| GitHub hardening | In progress | A basic active ruleset exists; PR-required rules still need review/update. Actions permissions API returned 403 with the current token. |
+| Current requirements | Pending | Historical v1 requirements must be superseded by current `Vynema` requirements. |
 | Current architecture | Pending | Historical v1 design docs must be marked historical or replaced by current design docs. |
 
 ## Current Product Assumptions
@@ -56,13 +56,13 @@ That material may be useful for reference, but it is not the current implementat
 
 Before public visibility, historical docs should be marked or moved so contributors can distinguish:
 
-- current `vynema` requirements;
+- current `Vynema` requirements;
 - current implementation architecture;
 - historical v1 planning artifacts.
 
 ## Next Actions
 
-1. Add current `vynema` requirements and architecture baseline.
+1. Add current `Vynema` requirements and architecture baseline.
 2. Run full working-tree and git-history secret scans.
 3. Apply GitHub-side repository hardening.
-4. Rename the GitHub repository to `vynema` before public visibility if possible.
+4. Keep GitHub repository settings aligned with `Saber5656/Vynema`.

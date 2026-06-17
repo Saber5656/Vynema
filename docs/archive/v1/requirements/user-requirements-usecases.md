@@ -2,7 +2,7 @@
 
 > Status: historical reference.
 > This document belongs to the earlier `AITube` / `AI Theater` planning phase.
-> The current `vynema` MVP baseline is `docs/requirements/vynema-mvp-requirements.md`.
+> The current `Vynema` MVP baseline is `docs/requirements/vynema-mvp-requirements.md`.
 
 # エンドユーザー要件・ユースケース整理
 

@@ -9,28 +9,20 @@ No GitHub repository mutation has been executed from this document.
 
 | Item | Value |
 |---|---|
-| Current repository | `Saber5656/AI-Theater` |
-| Planned repository | `Saber5656/vynema` |
-| Visibility target | Public-first after cleanup and protection |
+| Current repository | `Saber5656/Vynema` |
+| Planned repository | `Saber5656/Vynema` |
+| Visibility target | Public |
 | Default branch | `main` |
 
-## Step 1: Rename Repository
+## Step 1: Repository Rename
 
-Preferred manual UI path:
+Status: done outside this document.
 
-1. Open repository settings on GitHub.
-2. Rename `AI-Theater` to `vynema`.
-3. Confirm GitHub redirect behavior.
-4. Update the local remote.
-
-Equivalent `gh` command, if explicitly approved later:
+Local remote should point to:
 
 ```bash
-gh repo rename -R Saber5656/AI-Theater vynema
-git remote set-url origin https://github.com/Saber5656/vynema.git
+git remote set-url origin git@github.com:Saber5656/Vynema.git
 ```
-
-Do not run with `--yes` unless the target repository and rollback plan are confirmed.
 
 ## Step 2: Baseline Repository Settings
 
@@ -95,4 +87,3 @@ Before making the repository public:
 4. Confirm branch -> PR -> merge works.
 5. Confirm no workflow uses `pull_request_target`.
 6. Confirm no self-hosted runner is configured for public fork PRs.
-
