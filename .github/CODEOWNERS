@@ -1,0 +1,28 @@
+# Repository security ownership.
+# Replace or extend these entries when trusted maintainers are added.
+
+* @Saber5656
+
+.github/CODEOWNERS @Saber5656
+.github/workflows/** @Saber5656
+.github/dependabot.yml @Saber5656
+.github/pull_request_template.md @Saber5656
+.github/ISSUE_TEMPLATE/** @Saber5656
+
+README.md @Saber5656
+SECURITY.md @Saber5656
+CONTRIBUTING.md @Saber5656
+LICENSE @Saber5656
+
+package.json @Saber5656
+package-lock.json @Saber5656
+pnpm-lock.yaml @Saber5656
+yarn.lock @Saber5656
+requirements*.txt @Saber5656
+pyproject.toml @Saber5656
+poetry.lock @Saber5656
+Cargo.toml @Saber5656
+Cargo.lock @Saber5656
+go.mod @Saber5656
+go.sum @Saber5656
+Dockerfile @Saber5656

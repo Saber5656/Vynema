@@ -1,1 +1,38 @@
 .DS_Store
+
+# Local environment
+.env
+.env.*
+!.env.example
+
+# Secrets and credentials
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+*.secret
+*.secrets
+secrets/
+
+# Local tooling
+node_modules/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.turbo/
+.next/
+dist/
+build/
+coverage/
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
