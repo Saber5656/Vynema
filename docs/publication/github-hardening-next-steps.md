@@ -73,7 +73,7 @@ Initial solo-maintainer ruleset:
 
 | Rule | Initial State |
 |---|---|
-| Target | `refs/heads/main` |
+| Target | `~DEFAULT_BRANCH` |
 | Direct push | Blocked by requiring PR |
 | Required approvals | `0` initially for solo maintainer |
 | Code owner review | Off initially unless another maintainer can approve |
@@ -85,6 +85,12 @@ Initial solo-maintainer ruleset:
 | Required signatures | Add after commit signing is verified locally |
 | Bypass actors | Empty unless a documented temporary exception exists |
 
+Automation details:
+
+- See `docs/publication/github-ruleset-automation.md`.
+- Use `python3 scripts/github/apply-default-branch-ruleset.py --repo OWNER/REPO` for dry-run.
+- Use a temporary selected-repository `GH_TOKEN` with `Administration: write` for apply mode.
+
 ## Step 6: Verification
 
 Before making the repository public:
@@ -95,4 +101,3 @@ Before making the repository public:
 4. Confirm branch -> PR -> merge works.
 5. Confirm no workflow uses `pull_request_target`.
 6. Confirm no self-hosted runner is configured for public fork PRs.
-
