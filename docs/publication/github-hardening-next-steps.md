@@ -62,10 +62,21 @@ Manual UI is preferred for these initial settings:
 | Dependency graph | Enabled |
 | Dependabot alerts | Enabled |
 | Dependabot security updates | Enabled if available |
-| Dependabot version updates | Add after package manifests exist |
+| Dependabot version updates | GitHub Actions now; package managers after manifests exist |
 | Secret scanning | Enabled if available |
 | Push protection | Enabled if available |
 | CodeQL | Add after language/framework baseline is stable |
+
+See `docs/publication/pr-review-and-secret-scanning.md` for the PR review and secret scanning baseline.
+
+Initial repository files:
+
+| File | Purpose |
+|---|---|
+| `.github/workflows/secret-scan.yml` | PR/push high-confidence secret pattern check without third-party Actions |
+| `scripts/security/scan-secrets.py` | Local and CI secret pattern scanner |
+| `.github/dependabot.yml` | Weekly GitHub Actions update monitoring |
+| `AGENTS.md` | Public-safe Codex review guidance |
 
 ## Step 5: Main Ruleset
 
