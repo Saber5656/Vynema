@@ -85,12 +85,18 @@ Properties:
 
 | Property | Value |
 |---|---|
-| Event | `pull_request`, branch `push` except `main` |
+| Event | `pull_request`, manual `workflow_dispatch` |
 | Token permissions | `contents: read` |
 | Checkout action | `actions/checkout` pinned to full-length commit SHA |
 | Secrets used | None |
 | Third-party Actions | None |
 | Output behavior | Prints path and line only, not matched secret values |
+
+Push-time protection is handled by GitHub native push protection and by running the local scanner before push:
+
+```bash
+python3 scripts/security/scan-secrets.py
+```
 
 After this workflow succeeds once on GitHub, add its check name to the main ruleset required status checks.
 
