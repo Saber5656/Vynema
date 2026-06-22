@@ -32,7 +32,7 @@ The current product direction is:
 | Workstream | Status | Notes |
 |---|---|---|
 | Public OSS baseline | In progress | README, LICENSE, SECURITY, CONTRIBUTING, CODEOWNERS, issue templates, and PR template have been prepared. |
-| Repository naming | In progress | `vynema` collision check is recorded in `docs/publication/name-collision-check.md`. |
+| Repository naming | In progress | `vynema` name is approved; repository-local publication audit notes are not required. |
 | Public content cleanup | In progress | AI-DLC, Claude-specific, temporary, project-local skill files, and v1-only helper scripts have been removed or archived from active public scope. |
 | GitHub hardening | Pending | Rulesets, Actions permissions, Dependabot, CodeQL, and secret scanning still need GitHub-side setup. |
 | Current requirements | Pending | Historical v1 requirements must be superseded by current `vynema` requirements. |
