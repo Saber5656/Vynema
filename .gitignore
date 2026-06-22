@@ -37,9 +37,3 @@ coverage/
 *.log
 tmp/
 temp/
-
-# Local/private GitHub settings exports
-ruleset-exports/
-.github/ruleset-exports/
-docs/publication/ruleset-exports/
-protect-main-branch-*-OSS.json

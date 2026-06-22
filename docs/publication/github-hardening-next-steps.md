@@ -73,7 +73,7 @@ Initial repository files:
 
 | File | Purpose |
 |---|---|
-| `.github/workflows/secret-scan.yml` | PR/push high-confidence secret pattern check without third-party Actions |
+| `.github/workflows/secret-scan.yml` | PR high-confidence secret pattern check without third-party Actions |
 | `scripts/security/scan-secrets.py` | Local and CI secret pattern scanner |
 | `.github/dependabot.yml` | Weekly GitHub Actions update monitoring |
 | `AGENTS.md` | Public-safe Codex review guidance |
@@ -96,11 +96,11 @@ Initial solo-maintainer ruleset:
 | Required signatures | Add after commit signing is verified locally |
 | Bypass actors | Empty unless a documented temporary exception exists |
 
-Automation details:
+Ruleset baseline management:
 
-- See `docs/publication/github-ruleset-automation.md`.
-- Use `python3 scripts/github/apply-default-branch-ruleset.py --repo OWNER/REPO` for dry-run.
-- Use a temporary selected-repository `GH_TOKEN` with `Administration: write` for apply mode.
+- Keep reusable ruleset import/export templates in `github-oss-repo-hardening` under `skills-repo`.
+- Do not keep repository-administration mutation scripts or ruleset import templates in this application repository.
+- Apply Vynema rulesets through GitHub UI import, or from the maintained skills-repo baseline after explicit approval.
 
 ## Step 6: Verification
 
