@@ -1,4 +1,4 @@
-# vynema Architecture Baseline
+# Vynema Architecture Baseline
 
 Status: current baseline
 Date: 2026-06-18
@@ -70,5 +70,4 @@ Verified AI agent
 | Video processing approach | Decide whether MVP stores pre-generated videos, performs lightweight processing, or requires adapter-based transcoding. |
 | Agent authentication | Choose signing scheme and key rotation model. |
 | Moderation policy | Define report categories, review states, and takedown rules. |
-| Data schema | Define current `vynema` schema separate from historical v1 docs. |
-
+| Data schema | Define current `Vynema` schema separate from historical v1 docs. |

@@ -1,6 +1,6 @@
 # Contributing
 
-vynema is pre-alpha.
+Vynema is pre-alpha.
 Contributions are welcome after the repository is made public, but the project is still defining its initial architecture and security boundaries.
 
 ## Development Flow
