@@ -32,7 +32,7 @@ The current product direction is:
 | Workstream | Status | Notes |
 |---|---|---|
 | Public OSS baseline | In progress | README, LICENSE, SECURITY, CONTRIBUTING, CODEOWNERS, issue templates, and PR template have been prepared. |
-| Repository naming | Done | `Vynema` collision check is recorded in `docs/publication/name-collision-check.md`. |
+| Repository naming | Done | `Vynema` name is approved; repository-local publication audit notes are not required. |
 | Public content cleanup | In progress | AI-DLC, Claude-specific, temporary, project-local skill files, and v1-only helper scripts have been removed or archived from active public scope. |
 | GitHub hardening | In progress | A basic active ruleset exists; PR-required rules still need review/update. Actions permissions API returned 403 with the current token. |
 | Current requirements | Pending | Historical v1 requirements must be superseded by current `Vynema` requirements. |
