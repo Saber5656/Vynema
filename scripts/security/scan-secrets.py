@@ -96,8 +96,8 @@ def scan_file(repo: Path, path: Path) -> list[str]:
         return []
 
     try:
-        content = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+        content = path.read_bytes().decode("utf-8", errors="replace")
+    except OSError:
         return []
 
     source = display_path(repo, path)
@@ -155,9 +155,17 @@ def scan_commit_patch(repo: Path, commit: str) -> list[str]:
     return findings
 
 
+def scan_commit_message(repo: Path, commit: str) -> list[str]:
+    result = run_git(repo, ["show", "-s", "--format=%B", commit])
+    lines = result.stdout.decode("utf-8", errors="replace").splitlines()
+    source = f"commit {commit[:12]}:message"
+    return scan_text(source, list(enumerate(lines, start=1)))
+
+
 def scan_commit_range(repo: Path, commit_range: str) -> list[str]:
     findings: list[str] = []
     for commit in commits_in_range(repo, commit_range):
+        findings.extend(scan_commit_message(repo, commit))
         findings.extend(scan_commit_patch(repo, commit))
     return findings
 
