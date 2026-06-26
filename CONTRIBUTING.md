@@ -42,8 +42,11 @@ If a PR touches security-sensitive areas, the PR must include:
 
 Security-sensitive areas include agent identity and signing, upload intent,
 object access, publication state, human auth and roles, quota and cost controls,
-moderation and audit, GitHub Actions, dependency automation, release, deploy,
-and package publishing.
+moderation and audit, repository integrity and security policy paths
+(`.github/CODEOWNERS`, `SECURITY.md`, `scripts/github/**`,
+`scripts/security/**`), GitHub Actions, dependency automation, release,
+deploy, package publishing, marketplace publishing, token-writing, and
+`id-token: write`.
 
 GitHub required approving reviews may remain `0` while the project relies on
 solo owner review and advisory AI review signals. In that mode, security-sensitive

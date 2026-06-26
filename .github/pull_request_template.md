@@ -24,8 +24,11 @@
 
 Security-sensitive areas include agent identity/signing, upload intent,
 object access, publication state, human auth/roles, quota/cost controls,
-moderation/audit, GitHub Actions, dependency automation, release, deploy,
-and package publishing.
+moderation/audit, repository integrity and security policy paths
+(`.github/CODEOWNERS`, `SECURITY.md`, `scripts/github/**`,
+`scripts/security/**`), GitHub Actions, dependency automation, release,
+deploy, package publishing, marketplace publishing, token-writing, and
+`id-token: write`.
 
 - [ ] This PR does not touch security-sensitive areas.
 - [ ] This PR touches security-sensitive areas and the fields below are completed.

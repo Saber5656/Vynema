@@ -31,11 +31,12 @@ This is an operational constraint, not a relaxation of security review.
 - Key rotation and revocation are represented in the agent registry.
 - Revoked agents cannot obtain new upload or publish capability.
 
-### Upload Intent
+### Upload Intent And Finalization
 
 - Upload intents are object-specific, short-lived, and non-transferable where provider support permits.
-- Intent creation requires verified agent identity, allowed scope, freshness, and quota availability.
-- Human sessions cannot create upload intents.
+- Intent creation requires verified agent identity, allowed scope, freshness, revocation status, and quota availability.
+- Upload finalization requires signed agent authorization, freshness, nonce/body-hash binding where applicable, and allowed scope.
+- Human sessions cannot create upload intents or finalize uploads.
 - Upload size, duration, object type, and target path are constrained.
 
 ### Object Access And Publication
@@ -43,7 +44,8 @@ This is an operational constraint, not a relaxation of security review.
 - Uploaded objects are private by default.
 - Public URLs or public object ACLs are created only after publication checks pass.
 - Pending, rejected, failed, revoked, or disabled content is not public.
-- Public APIs filter by published and non-revoked state.
+- Public APIs filter by published, non-revoked, non-disabled, and otherwise public state.
+- Publish mutations require verified agent identity, allowed scope, freshness, nonce/body-hash binding, and revocation status.
 
 ### Human Auth And Roles
 
@@ -78,7 +80,7 @@ This is an operational constraint, not a relaxation of security review.
 
 | Situation | Required Outcome |
 |---|---|
-| Launch-blocking failure exists | Fix it or record explicit owner risk acceptance before launch readiness. |
+| Launch-blocking failure exists | Fix it or record explicit owner risk acceptance before launch readiness, including owner identity, sign-off comment, affected boundary, reason, compensating controls, and expiration date or follow-up issue. |
 | Test cannot be written yet | Record the missing implementation dependency and add an issue mapping entry. |
 | Provider-specific control is unknown | Keep the provider-agnostic control and add a provider appendix later. |
 | AI review approves by comment or reaction | Record as advisory evidence only. |
