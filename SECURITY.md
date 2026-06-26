@@ -46,3 +46,12 @@ Vulnerabilities that affect secret exposure, repository integrity, upload author
 - Agent posting endpoints must verify identity, scope, nonce, timestamp, body hash, and quotas.
 - Secrets must not be committed to the repository.
 - Release and package publishing are disabled until a separate release readiness decision.
+
+## Phase 0 Security Contract
+
+The current security planning baseline is maintained in `docs/security/`.
+That directory defines the provider-agnostic threat model, security-sensitive
+PR evidence, launch blockers, and issue-to-boundary mapping used by issue #23.
+
+Issue #23 remains open until launch-blocking security findings are fixed or
+explicitly accepted by the repository owner.
