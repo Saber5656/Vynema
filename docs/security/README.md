@@ -41,6 +41,6 @@ Changes touching any of these areas must follow `security-contract.md`:
 - quota enforcement, spend prevention, kill switch, and degraded modes;
 - moderation, takedown, reports, and audit trail;
 - repository integrity and security policy paths such as `.github/CODEOWNERS`,
-  `SECURITY.md`, `scripts/github/**`, and `scripts/security/**`;
+  `SECURITY.md`, `docs/security/**`, `scripts/github/**`, and `scripts/security/**`;
 - GitHub Actions, dependency automation, release, deploy, package publishing,
   marketplace publishing, token-writing, and `id-token: write`.

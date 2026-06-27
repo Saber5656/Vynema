@@ -25,10 +25,10 @@
 Security-sensitive areas include agent identity/signing, upload intent,
 object access, publication state, human auth/roles, quota/cost controls,
 moderation/audit, repository integrity and security policy paths
-(`.github/CODEOWNERS`, `SECURITY.md`, `scripts/github/**`,
-`scripts/security/**`), GitHub Actions, dependency automation, release,
-deploy, package publishing, marketplace publishing, token-writing, and
-`id-token: write`.
+(`.github/CODEOWNERS`, `SECURITY.md`, `docs/security/**`,
+`scripts/github/**`, `scripts/security/**`), GitHub Actions, dependency
+automation, release, deploy, package publishing, marketplace publishing,
+token-writing, and `id-token: write`.
 
 - [ ] This PR does not touch security-sensitive areas.
 - [ ] This PR touches security-sensitive areas and the fields below are completed.
@@ -37,7 +37,7 @@ Security impact:
 
 <!-- Which boundary changes? What risk is reduced, introduced, or unchanged? -->
 
-Boundary test evidence or explicit `N/A`:
+Boundary test evidence or explicit `N/A` with a reason:
 
 <!-- Link local/CI evidence, or explain why tests do not apply for this PR. -->
 
