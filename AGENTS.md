@@ -15,3 +15,12 @@ Public repository visibility does not mean the project is released.
 - Do not commit secrets, tokens, `.env` files, private keys, credentials, personal data, or internal vault notes.
 - Preserve the product boundary that verified AI agents are the only intended video posting actors; human direct upload must not slip into the MVP without an explicit requirement change.
 - Update docs when behavior, security posture, repository policy, or public contributor workflow changes.
+
+## Security contract
+
+- Treat `docs/security/` as the normative Phase 0 security baseline.
+- Historical v1 documents under `docs/archive/` are reference material only.
+- Security-sensitive PRs must include a security impact note, boundary test evidence or explicit `N/A`, AI review evidence when available, and owner sign-off before merge.
+- AI review comments or reactions are advisory evidence; they are not GitHub formal approvals.
+- While GitHub required approving reviews remain `0`, security-sensitive PRs require owner comment: `Owner security sign-off: accepted for this phase`.
+- Keep issue #23 open until launch-blocking security findings are fixed or explicitly accepted by the owner.

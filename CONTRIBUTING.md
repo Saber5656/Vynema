@@ -29,6 +29,33 @@ Before opening a PR:
 - avoid `pull_request_target` unless a threat review explicitly approves it;
 - avoid self-hosted runners for public fork PRs.
 
+## Security-Sensitive Pull Requests
+
+The Phase 0 security baseline lives in `docs/security/`.
+
+If a PR touches security-sensitive areas, the PR must include:
+
+- a security impact note;
+- boundary test evidence or an explicit `N/A` with a reason;
+- Codex or CodeRabbit review evidence when available;
+- owner sign-off before merge.
+
+Security-sensitive areas include agent identity and signing, upload intent,
+object access, publication state, human auth and roles, quota and cost controls,
+moderation and audit, repository integrity and security policy paths
+(`.github/CODEOWNERS`, `SECURITY.md`, `docs/security/**`,
+`scripts/github/**`, `scripts/security/**`), GitHub Actions, dependency
+automation, release, deploy, package publishing, marketplace publishing,
+token-writing, and `id-token: write`.
+
+GitHub required approving reviews may remain `0` while the project relies on
+solo owner review and advisory AI review signals. In that mode, security-sensitive
+PRs require an explicit owner comment:
+
+```text
+Owner security sign-off: accepted for this phase
+```
+
 ## Dependency Changes
 
 Dependency manifest and lock file changes require extra care.

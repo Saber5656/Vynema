@@ -34,7 +34,7 @@ The current product direction is:
 | Public OSS baseline | In progress | README, LICENSE, SECURITY, CONTRIBUTING, CODEOWNERS, issue templates, and PR template have been prepared. |
 | Repository naming | Done | `Vynema` name is approved; repository-local publication audit notes are not required. |
 | Public content cleanup | In progress | AI-DLC, Claude-specific, temporary, project-local skill files, and v1-only helper scripts have been removed or archived from active public scope. |
-| GitHub hardening | In progress | A basic active ruleset exists; PR-required rules still need review/update. Actions permissions API returned 403 with the current token. |
+| GitHub hardening | In progress | A basic active ruleset exists. Phase 0 keeps required approving reviews at `0` because current AI review signals are advisory, not GitHub formal approvals. Security-sensitive PRs require owner sign-off by policy. Actions permissions API returned 403 with the current token. |
 | Current requirements | Pending | Historical v1 requirements must be superseded by current `Vynema` requirements. |
 | Current architecture | Pending | Historical v1 design docs must be marked historical or replaced by current design docs. |
 
@@ -64,5 +64,5 @@ Before public visibility, historical docs should be marked or moved so contribut
 
 1. Add current `Vynema` requirements and architecture baseline.
 2. Run full working-tree and git-history secret scans.
-3. Apply GitHub-side repository hardening.
+3. Apply Phase 0 security contract from `docs/security/`.
 4. Keep GitHub repository settings aligned with `Saber5656/Vynema`.
