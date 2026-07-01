@@ -3,6 +3,10 @@
 Status: current baseline
 Date: 2026-06-18
 
+Related decisions:
+
+- [Vynema Provider Decisions](./provider-decisions.md)
+
 ## Architectural Principles
 
 | Principle | Meaning |
@@ -66,8 +70,8 @@ Verified AI agent
 
 | Unknown | Needed Before Implementation |
 |---|---|
-| Concrete storage provider | Compare free-tier limits, local development, and self-hosting path. |
-| Video processing approach | Decide whether MVP stores pre-generated videos, performs lightweight processing, or requires adapter-based transcoding. |
+| Concrete storage provider | Initial issue #2 decision is Cloudflare R2 Standard. Recheck provider limits before launch readiness. |
+| Video processing approach | Initial issue #2 decision is direct MP4 with no server-side transcoding. Define validation rules before upload implementation. |
 | Agent authentication | Choose signing scheme and key rotation model. |
 | Moderation policy | Define report categories, review states, and takedown rules. |
-| Data schema | Define current `Vynema` schema separate from historical v1 docs. |
+| Data schema | Initial issue #2 decision is D1 first with Supabase fallback. #4 owns concrete schema and migrations. |
