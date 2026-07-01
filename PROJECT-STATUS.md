@@ -1,6 +1,6 @@
 # Vynema Project Status
 
-Last updated: 2026-06-18
+Last updated: 2026-06-28
 
 ## Overview
 
@@ -35,7 +35,7 @@ The current product direction is:
 | Repository naming | Done | `Vynema` name is approved; repository-local publication audit notes are not required. |
 | Public content cleanup | In progress | AI-DLC, Claude-specific, temporary, project-local skill files, and v1-only helper scripts have been removed or archived from active public scope. |
 | GitHub hardening | In progress | A basic active ruleset exists. Phase 0 keeps required approving reviews at `0` because current AI review signals are advisory, not GitHub formal approvals. Security-sensitive PRs require owner sign-off by policy. Actions permissions API returned 403 with the current token. |
-| Current requirements | Pending | Historical v1 requirements must be superseded by current `Vynema` requirements. |
+| Current requirements | Current baseline exists | `docs/requirements/vynema-mvp-requirements.md` is the issue #1 implementation contract. Business review of launch wording is still required before launch readiness and should be recorded as a PR comment. |
 | Current architecture | Pending | Historical v1 design docs must be marked historical or replaced by current design docs. |
 
 ## Current Product Assumptions
@@ -62,7 +62,8 @@ Before public visibility, historical docs should be marked or moved so contribut
 
 ## Next Actions
 
-1. Add current `Vynema` requirements and architecture baseline.
-2. Run full working-tree and git-history secret scans.
-3. Apply Phase 0 security contract from `docs/security/`.
-4. Keep GitHub repository settings aligned with `Saber5656/Vynema`.
+1. Use `docs/requirements/vynema-mvp-requirements.md` as the current issue #1 requirements baseline.
+2. Finalize provider and quota decisions for issue #2.
+3. Remove or de-emphasize inactive AI-DLC workflow material for issue #3 while preserving historical context.
+4. Run full working-tree and git-history secret scans before launch readiness.
+5. Keep Phase 0 security contract evidence aligned with `docs/security/`.
