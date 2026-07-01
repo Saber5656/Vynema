@@ -1,7 +1,7 @@
 # Vynema Architecture Baseline
 
 Status: current revised v2 design for the MVP baseline
-Date: 2026-07-02
+Date: 2026-07-02 (JST)
 
 This document is the current revised v2 design referenced by issue #1.
 Its scope is intentionally limited to creating the Vynema MVP baseline.
