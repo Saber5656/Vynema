@@ -81,7 +81,7 @@ Evidence:
 Constraints:
 
 - Workers must not proxy video bytes. Video upload and playback must use direct,
-  scoped R2 URLs or public object URLs after publication checks pass.
+  scoped, revocable R2 capabilities after authorization checks pass.
 - Worker routes that change publication, upload, moderation, quota, or audit
   state must fail closed when credentials, quota state, or provider state is
   unavailable.
@@ -164,6 +164,20 @@ Constraints:
   clear.
 - Use scoped direct upload and direct playback access. App servers and Workers
   must not proxy MP4 bytes.
+- Upload capability must enforce maximum object size before R2 accepts bytes, or
+  use an equivalent staging and cleanup quota design that prevents oversized
+  writes from consuming unbounded storage or operation budget.
+- Direct upload must use one-time or conditional writes where provider support
+  permits. Finalization must bind the reviewed media to an immutable object
+  version, ETag, or content hash, not only to a mutable object key.
+- Any write capability for the finalized object must expire or be revoked before
+  publication.
+- Playback access must be revocable. The preferred design is private R2 objects
+  with short-lived signed playback URLs. If public object URLs are used later,
+  revocation or takedown must include an explicit storage access change such as
+  move, delete, or unpublish.
+- Playback quota controls must account for actual object reads or URL reuse, not
+  only signed URL issuance count.
 - Do not use R2 Infrequent Access for the MVP because retrieval charges and
   minimum storage duration conflict with the no-paid-spend constraint.
 
@@ -217,7 +231,7 @@ Tradeoffs:
 
 | Benefit | Cost | Mitigation |
 |---|---|---|
-| No paid video processing dependency | Agents must produce valid playback assets | Validate MIME type, size, duration, and metadata before publication. |
+| No paid video processing dependency | Agents must produce valid playback assets | Enforce upload size before storage accepts bytes, then validate MIME type, duration, metadata, and immutable object identity before publication. |
 | Simpler storage and playback | No adaptive bitrate streaming | Keep MVP expectations modest and document playback constraints. |
 | Smaller attack and operations surface | Less control over generated media quality | Manual review and report/takedown states remain available. |
 
@@ -231,7 +245,7 @@ Application quotas should sit below these values.
 | Cloudflare Pages | 1 concurrent build, 500 builds/month, unlimited static requests and bandwidth | Build exhaustion can block previews or releases | Keep production release manual and avoid build loops. |
 | Cloudflare Workers | 100,000 requests/day, 10 ms CPU/invocation, 50 subrequests/invocation, 128 MB memory | Limit exhaustion can return provider errors or bypass Workers if fail-open is configured | Configure security-sensitive routes fail-closed and enforce app quotas first. |
 | Cloudflare D1 | 5 million rows read/day, 100,000 rows written/day, 5 GB storage | Read/write errors after daily limits; storage exhaustion blocks writes | Keep global and per-agent counters below provider limits. |
-| Cloudflare R2 Standard | 10 GB-month storage/month, 1 million Class A ops/month, 10 million Class B ops/month, no egress charge | Storage or operation overage could create billing risk if not constrained | Enforce storage, upload, publication, and signed URL quotas before provider limits. |
+| Cloudflare R2 Standard | 10 GB-month storage/month, 1 million Class A ops/month, 10 million Class B ops/month, no egress charge | Storage or operation overage could create billing risk if not constrained | Enforce storage, upload, publication, signed URL, and playback-read controls before provider limits. |
 | Clerk Hobby | No credit card, 50,000 monthly retained users/application, 3 dashboard seats | Growth or feature needs can require Pro | Keep human auth optional enough to replace with minimal auth. |
 | Supabase fallback | Two free projects; Free Plan bandwidth totals 10 GB across database, storage, and functions | Bandwidth, project, inactivity, or database limits may conflict with no-paid-spend | Use only after a fresh limits review and owner decision. |
 
@@ -262,7 +276,7 @@ spend before provider limits are exceeded.
 |---|---|
 | Docs-only scope | Issue #2 records decisions only. It does not create provider resources or credentials. |
 | Provider billing | Production provisioning must document how automatic paid usage, paid storage classes, and paid features are disabled or blocked. |
-| App quotas | Application limits must sit below provider free-tier limits for storage, operations, requests, publication rate, and signed URL issuance. |
+| App quotas | Application limits must sit below provider free-tier limits for storage, operations, requests, publication rate, signed URL issuance, and playback reads or URL reuse. |
 | Kill switches | Upload and publication can be stopped without deployment. Public exposure can be disabled for revoked or moderated content. |
 | Failure mode | Missing quota state, missing credentials, provider errors, or uncertain spend state fail closed for upload, publish, and signed URL capability. |
 | Review gate | Deployment, release, marketplace, package publishing, token-writing, and paid-feature enablement require explicit owner approval. |
@@ -283,6 +297,8 @@ These decisions preserve the Phase 0 security baseline:
 - Agents require separate signed request authorization.
 - Uploaded media is private until publication checks pass.
 - Public APIs must filter unpublished, revoked, disabled, or unreviewed content.
+- Revoked, disabled, or taken-down media must lose public storage access, not
+  only disappear from metadata APIs.
 - Quota failures and missing credentials fail closed.
 - CI/CD changes remain non-release automation until an explicit release decision.
 - App servers and Workers do not proxy video bytes.
