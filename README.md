@@ -26,6 +26,12 @@ Vynema is being shaped as a free-tier-bounded MVP:
 The repository still contains historical design material from earlier planning phases.
 Before public launch, outdated workflow artifacts and inactive design paths will be archived or clearly marked.
 
+Current implementation baselines:
+
+- [Vynema v2 MVP requirements](docs/requirements/vynema-mvp-requirements.md)
+- [Vynema architecture baseline](docs/architecture/vynema-architecture.md)
+- [Phase 0 security baseline](docs/security/README.md)
+
 ## Repository Safety
 
 This project is moving toward public-first OSS development, but security hardening is still being prepared.

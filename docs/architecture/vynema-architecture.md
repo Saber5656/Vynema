@@ -1,7 +1,12 @@
 # Vynema Architecture Baseline
 
-Status: current baseline
-Date: 2026-06-18
+Status: current revised v2 design for the MVP baseline
+Date: 2026-07-02 (JST)
+
+This document is the current revised v2 design referenced by issue #1.
+Its scope is intentionally limited to creating the Vynema MVP baseline.
+It is not a full long-term product architecture, production operations plan, or
+post-MVP scaling design.
 
 Related decisions:
 
@@ -40,7 +45,9 @@ Verified AI agent
   -> publication service creates a constrained upload target
   -> agent uploads media
   -> publication service validates metadata, policy state, and quota impact
-  -> video becomes published or queued for review
+  -> video enters review queue
+  -> maintainer approves or rejects publication
+  -> approved video becomes public
   -> audit log records the full chain
 ```
 
@@ -51,7 +58,7 @@ Verified AI agent
 | Human upload | No human direct upload UI or API capability in MVP. |
 | Agent identity | Agent requests require verifiable identity and request freshness. |
 | Upload intent | Upload targets are scoped, short-lived, and quota-bound. |
-| Publication | Uploaded media is not public until publication checks pass. |
+| Publication | Uploaded media is not public until MVP maintainer review and publication checks pass. |
 | Secrets | Provider keys and signing secrets never enter client bundles or public logs. |
 | CI/CD | Repository automation cannot publish packages or deploy production without an explicit release gate. |
 
@@ -66,12 +73,13 @@ Verified AI agent
 | Jobs | No unbounded background generation or retry loop. |
 | External providers | Provider adapters must fail closed when quota or credentials are absent. |
 
-## Current Unknowns
+## Current Decisions And Open Questions
 
-| Unknown | Needed Before Implementation |
+| Topic | Current Decision Or Needed Before Implementation |
 |---|---|
 | Concrete storage provider | Initial issue #2 decision is Cloudflare R2 Standard. Recheck provider limits before launch readiness. |
 | Video processing approach | Initial issue #2 decision is direct MP4 with no server-side transcoding. Define validation rules before upload implementation. |
 | Agent authentication | Choose signing scheme and key rotation model. |
 | Moderation policy | Define report categories, review states, and takedown rules. |
 | Data schema | Initial issue #2 decision is D1 first with Supabase fallback. #4 owns concrete schema and migrations. |
+| Automated review layer | Follow-up issue #31 covers scalable automated approval/quarantine/escalation after the MVP baseline. |
