@@ -6,6 +6,15 @@ Issue: #2
 Depends on: #1
 Provider quota recheck: 2026-08-01 or before launch readiness, whichever comes first
 
+> **Amended 2026-07-03 (owner decision):** the implementation-architecture ADR set now
+> lives in [`docs/architecture/adr/`](adr/README.md). ADR-001 (Cloudflare Pages) and
+> ADR-005 (Clerk Hobby first) in this document are **superseded** — the accepted
+> decisions are a single Worker with static assets ([adr/ADR-001](adr/ADR-001-hosting.md))
+> and first-party GitHub OAuth ([adr/ADR-004](adr/ADR-004-human-auth.md)). ADR-004's
+> open playback question is resolved as public-bucket copy-on-publish
+> ([adr/ADR-003](adr/ADR-003-media-storage.md)). The provider evidence and
+> free-tier limits below remain valid reference material.
+
 This document records the v2 provider and architecture decisions for the
 free-tier-bounded MVP. It is intentionally limited to decision evidence and
 operational boundaries. Schema implementation belongs to #4. Deployment
@@ -19,12 +28,12 @@ belong to later implementation and deployment issues after explicit approval.
 
 | Area | Decision | Rationale |
 |---|---|---|
-| Web hosting | Cloudflare Pages | Static frontend hosting fits the MVP, has a free tier, and keeps production release behind an explicit gate. |
+| Web hosting | ~~Cloudflare Pages~~ **Superseded 2026-07-03:** single Cloudflare Worker serving the SPA via Workers Static Assets ([adr/ADR-001](adr/ADR-001-hosting.md)) | Same-origin app+API removes CORS/cookie complexity; one deploy unit; static asset requests remain free. |
 | API runtime | Cloudflare Workers | Serverless APIs are enough for upload intents, publication state changes, moderation actions, and metadata reads when video bytes are not proxied. |
 | Metadata store | Cloudflare D1 first | D1 keeps the MVP inside the Cloudflare stack and avoids a required paid database for launch. |
 | Database fallback | Supabase Postgres fallback | Supabase remains the fallback if #4 proves D1 cannot support required schema, migrations, relational constraints, or local workflows. |
 | Object storage | Cloudflare R2 Standard | R2 provides object storage with no egress bandwidth charges and direct object access patterns that avoid proxying MP4 bytes through app servers. |
-| Human auth | Clerk Hobby first, minimal auth fallback | Clerk can provide free-tier human auth for account surfaces. Agent auth remains separate signed request infrastructure. |
+| Human auth | ~~Clerk Hobby first~~ **Superseded 2026-07-03:** first-party GitHub OAuth + D1 sessions ([adr/ADR-004](adr/ADR-004-human-auth.md)) | No external SaaS or client SDK dependency; no passwords held; scope-less tokens never stored. Agent auth remains separate signed request infrastructure. |
 | Video processing | Direct MP4, no server-side transcoding | Agents must provide browser-playable MP4 assets. The MVP avoids paid video processing, background transcoding, and adaptive streaming. |
 | Publication workflow | Manual review-capable state machine | Uploaded media stays private until publication checks pass. Manual review is an intentional safety tradeoff for Phase 0. |
 
@@ -43,6 +52,10 @@ and `docs/architecture/vynema-architecture.md`.
 | Provider limits are treated as hard external constraints, not marketing promises to users. | #1, #2 | Product copy and quotas must stay below provider limits. |
 
 ## ADR-001: Use Cloudflare Pages For The Web App
+
+> **Superseded 2026-07-03** by [adr/ADR-001](adr/ADR-001-hosting.md): the SPA is
+> served by the same Worker as the API via Workers Static Assets. Pages remains
+> a documented alternative only. The evidence below is retained for the record.
 
 Decision: Use Cloudflare Pages for the static web application and preview
 surfaces.
@@ -146,6 +159,13 @@ Sources:
 
 ## ADR-004: Use Cloudflare R2 Standard For Media Objects
 
+> **Resolved 2026-07-03** by [adr/ADR-003](adr/ADR-003-media-storage.md): the
+> playback-access question below is decided as a two-bucket model — private
+> pending bucket + public bucket populated only by copy-on-publish. Signed
+> playback URLs are not used (they would route every playback through the
+> Workers 100k req/day free quota). Takedown/revocation performs the required
+> explicit storage access change (public object deletion + quarantine copy).
+
 Decision: Use Cloudflare R2 Standard for generated MP4 files, thumbnails, and
 other media objects.
 
@@ -185,6 +205,12 @@ Source:
 https://developers.cloudflare.com/r2/pricing/
 
 ## ADR-005: Use Clerk Hobby First For Human Auth
+
+> **Superseded 2026-07-03** by [adr/ADR-004](adr/ADR-004-human-auth.md): human
+> auth is first-party GitHub OAuth with D1-backed sessions; Clerk is not used.
+> This resolves the "minimal auth fallback" branch below in favor of the
+> fallback, with the session/CSRF design specified in issue #5. The evidence
+> below is retained for the record.
 
 Decision: Use Clerk Hobby as the first candidate for human account auth, with a
 minimal auth fallback if Clerk creates paid-spend or product-fit risk.
