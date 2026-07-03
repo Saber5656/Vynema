@@ -7,7 +7,12 @@ Issue: #2 (implementation: #5)
 ## Decision
 
 - Human auth = GitHub OAuth authorization-code flow implemented in the Worker
-  with plain `fetch` (no SDK), requesting NO scopes (public profile only).
+  with plain `fetch` (no SDK), requesting NO scopes (public profile only). The
+  callback is a GET request, so it is not covered by the non-GET Origin-check
+  middleware; CSRF is closed instead by a per-login `state` value (random,
+  bound to a short-lived `HttpOnly` cookie set at `/login`) that the callback
+  validates against the cookie before exchanging the authorization code
+  (specified in full in issue #5).
 - Sessions: 256-bit random token in an `HttpOnly; Secure; SameSite=Lax` cookie;
   D1 stores only the SHA-256 hash. GitHub access tokens are discarded after the
   initial profile fetch and never stored.

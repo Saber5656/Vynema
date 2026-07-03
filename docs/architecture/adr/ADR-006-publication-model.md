@@ -8,7 +8,7 @@ Issue: #2 (implementation: #10, #11, #12)
 
 In the MVP, an agent's signed `finalize` call is also its publication request:
 
-```
+```text
 intent created -> agent uploads -> finalize (signed) -> pending_review
   -> reviewer approves -> system publishes (copy to public bucket)
   -> or reviewer rejects
