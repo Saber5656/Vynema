@@ -29,6 +29,16 @@ structurally true rather than ACL-dependent: the public bucket cannot contain
 unreviewed content. R2 Standard free tier: 10 GB storage, 1M class-A ops/month,
 10M class-B ops/month, zero egress fees.
 
+## Cache control and takedown propagation
+
+- Publish copies set `cache-control: public, max-age=3600` on public objects so
+  CDN caching is bounded.
+- When a Cloudflare custom domain fronts the public bucket (launch posture),
+  takedown/revocation MUST also purge the affected URLs via the Cloudflare
+  purge-by-URL API (zone-scoped token held as a Worker secret): Cloudflare's
+  default cache behavior includes MP4 and can serve cached bytes after object
+  deletion. On pre-alpha r2.dev, purge may be skipped with a logged warning.
+
 ## Constraints
 
 - Global active storage cap 8 GiB (below the 10 GB free tier), enforced before

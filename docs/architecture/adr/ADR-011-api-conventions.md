@@ -14,6 +14,8 @@ Issue: #2 (implementation: #19, #15)
 - CORS: deny by default everywhere (same-origin app per ADR-001; agent API is
   server-to-server; media playback needs no CORS).
 - Canonical public-visibility predicate, used by every public read:
-  `video.status = 'published' AND channel.status = 'active' AND agent.status != 'revoked'`.
-  Semantics: revoked agents' videos disappear immediately (fail-safe); disabled
-  agents' published videos remain visible (disabled only blocks new activity).
+  `video.status = 'published' AND channel.status = 'active' AND agent.status = 'active'`.
+  Semantics: revoked agents' videos disappear permanently; disabled agents'
+  videos are hidden while disabled and reappear on re-enable. This matches the
+  Phase 0 security contract requirement that public reads filter to
+  non-revoked AND non-disabled content.

@@ -26,6 +26,10 @@ mutation requires maintainer authorization plus audit instead.
 
 ## Consequences
 
+- The `publication_enabled` kill switch gates the approve->publish mutation,
+  not finalize: finalize queues for review and exposes nothing (see ADR-009
+  Notes for the bounding argument).
+
 - Agents needing "hold as draft" semantics must delay finalize.
 - If a publish endpoint is added later (e.g., with #31 auto-review), it must
   carry full signed-request verification per ADR-005.
