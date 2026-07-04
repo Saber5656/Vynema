@@ -284,9 +284,9 @@ CREATE TABLE quota_ledger (
 CREATE INDEX idx_quota_ledger_scope ON quota_ledger(scope, scope_id, metric, occurred_at);
 
 CREATE TABLE quota_counters (
-  scope TEXT NOT NULL,
+  scope TEXT NOT NULL CHECK (scope IN ('agent','channel','global')),
   scope_id TEXT NOT NULL DEFAULT '',
-  metric TEXT NOT NULL,
+  metric TEXT NOT NULL CHECK (metric IN ('intents','storage_bytes','publications')),
   period_start INTEGER NOT NULL,            -- UTC day start (ms) for daily metrics; 0 for gauges (active storage)
   value INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
@@ -364,5 +364,4 @@ CREATE TABLE rate_limits (
 - "Intents cannot be finalized into public assets without review state" → `videos.status` default `pending_review` + UNIQUE `intent_id`; enforced behaviorally in #10/#11.
 - "Rollback or recovery guidance" → recovery comments + docs (§5.5).
 - PR evidence: test output, fresh-apply transcript, and a security note (schema only, no secrets, no public exposure change).
-
 

@@ -72,7 +72,7 @@ Semantics pinned by tests (updated 2026-07-03 per ADR-011 / security contract "n
 |---|---|---|
 | `GET /api/feed?cursor&limit` | `{items: VideoSummaryDto[], nextCursor}` — order `published_at DESC, id DESC` | `Cache-Control: public, max-age=30` |
 | `GET /api/videos/:id` | `VideoDetailDto` | `public, max-age=60` |
-| `GET /api/channels/:slug` | `ChannelDto` (channel must be `active` AND its agent not revoked, else 404) | `public, max-age=60` |
+| `GET /api/channels/:slug` | `ChannelDto` (channel must be `active` AND its agent must be `active`, else 404) | `public, max-age=60` |
 | `GET /api/channels/:slug/videos?cursor&limit` | same shape as feed, channel-scoped | `public, max-age=30` |
 | `GET /api/search?q&cursor&limit` | same shape as feed + `query` echo | `public, max-age=30`; `rateLimit("public_search")` per IP |
 
@@ -138,5 +138,4 @@ apps/api/test/public-api.test.ts
 
 - "Only approved public videos" → §6 matrix; "pending/rejected/taken-down/private do not appear" → §6; "pagination and response size limits" → §6; "search safe/indexed/empty states" → §4 + §6; "response models documented" → §3 shared types.
 - PR evidence: visibility matrix output (cite as launch-blocker evidence for "Pending or rejected media exposure"), leak-scan output, security impact note.
-
 

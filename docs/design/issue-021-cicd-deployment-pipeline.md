@@ -16,7 +16,7 @@ Implement the build, test, migration, preview, and production deployment workflo
 
 - Add CI jobs for install, lint, typecheck, tests, and build.
 - Wire the test commands produced by AIT-MVP-020 into CI when available; CI scaffolding must not wait for AIT-MVP-020 to close.
-- Add deployment configuration for Cloudflare Pages and Workers or selected equivalent.
+- Add deployment configuration for the selected Cloudflare Worker + Static Assets stack.
 - Add D1 migration deployment process.
 - Add R2 bucket binding and environment variable management.
 - Define preview and production deployment gates.
@@ -72,15 +72,15 @@ Source Task: TSK-1260
 
 #### `.github/workflows/deploy.yml`
 
-- Trigger: `workflow_dispatch` with `inputs.environment: choice [preview, production]`. **No push/PR/schedule trigger. Merging to `main` never deploys** (explicit release gate).
-- `permissions: { contents: read }`. Job `deploy` with `environment: ${{ inputs.environment }}` — the GitHub Environment supplies secrets and, for `production`, a required-reviewer approval gate (owner). Setting up the environments (names `preview`, `production`; production: required reviewer = owner; both: secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) is an owner console step — document exact clicks in `docs/deployment.md`.
+- Trigger: `workflow_dispatch` with `inputs.environment: choice [preview, production]`. **No push/PR/schedule trigger. Merging to `main` never deploys** (explicit release gate). The deploy job must also guard `github.ref == 'refs/heads/main'` (or explicitly check out the protected main SHA) so manually dispatched non-main refs cannot deploy.
+- `permissions: { contents: read }`. Job `deploy` with `if: github.ref == 'refs/heads/main'` and `environment: ${{ inputs.environment }}` — the GitHub Environment supplies secrets and, for `production`, a required-reviewer approval gate (owner). Setting up the environments (names `preview`, `production`; production: required reviewer = owner; both: secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) is an owner console step — document exact clicks in `docs/deployment.md`.
 - Steps: checkout (pinned) → pnpm/node setup → install → `pnpm build` → `pnpm --filter @vynema/api exec wrangler d1 migrations apply vynema-db --env ${{ inputs.environment }} --remote` → `pnpm --filter @vynema/api exec wrangler deploy --env ${{ inputs.environment }}`.
 - Cloudflare API token scope (least privilege): Account → Workers Scripts:Edit, D1:Edit, Workers R2 Storage: none (buckets pre-provisioned per #9/#29). No account-wide admin token. Document creation steps.
 - No `id-token: write`, no package publishing, no marketplace, no token-writing steps anywhere. Adding any of those requires the release-readiness review per the security contract.
 
 #### Existing `secret-scan.yml`
 
-Keep; verify it also runs on `pull_request` and pin its actions to SHAs while touching CI (same PR).
+Keep; verify it also runs on `pull_request` and pin its actions to SHAs while touching CI (same PR). Include its `high-confidence-secret-scan` check in required branch-protection checks alongside `checks` and `e2e` once branch protection is configured.
 
 ### 2. `wrangler.toml` environments (extends #34's file)
 
@@ -106,7 +106,7 @@ Provisioning commands (run once by owner, recorded in `docs/deployment.md`; #29 
 
 ### 3. `docs/deployment.md` (new)
 
-Sections: environment model table (#2 ADR); one-time provisioning; how to deploy (Actions → deploy.yml → choose env → production waits for owner approval); verifying a deploy (`/api/health` shows environment, smoke per #20 §3); **rollback**: `wrangler deployments list` → `wrangler rollback [--message]` (workers versions), D1 = forward-only (fix-forward or Time Travel restore per #4 — WARNING: restores lose writes since timestamp; runbook #22 covers decision); **emergency disable**: kill switches first (#14 — no deploy needed), full stop = `wrangler versions deploy` of a maintenance version or Cloudflare dashboard disable; branch protection: after first CI run, add required status checks `checks` (+`e2e` later) — `gh api -X PUT repos/Saber5656/Vynema/branches/main/protection/required_status_checks` or console; owner performs.
+Sections: environment model table (#2 ADR); one-time provisioning; how to deploy (Actions → deploy.yml → choose env → production waits for owner approval and deploy job rejects non-main refs); verifying a deploy (`/api/health` shows environment, smoke per #20 §3); **rollback**: `wrangler deployments list` → `wrangler rollback [--message]` (workers versions), D1 = forward-only (fix-forward or Time Travel restore per #4 — WARNING: restores lose writes since timestamp; runbook #22 covers decision); **emergency disable**: kill switches first (#14 — no deploy needed), full stop = `wrangler versions deploy` of a maintenance version or Cloudflare dashboard disable; branch protection: after first CI run, add required status checks `checks`, `high-confidence-secret-scan` (+`e2e` later) — `gh api -X PUT repos/Saber5656/Vynema/branches/main/protection/required_status_checks` or console; owner performs.
 
 ### 4. Tests / verification
 
@@ -118,4 +118,3 @@ Sections: environment model table (#2 ADR); one-time provisioning; how to deploy
 
 - "CI blocks merge on failing steps" → §1 ci.yml + branch protection note; "test suite runs in CI once #20 lands" → e2e job clause; "preview deployments with preview bindings" → §2; "production instructions documented/repeatable" → §3; "secrets not committed" → secret flow (§2) + scan workflow; "migration order and rollback documented" → §3; "no automatic paid spend" → free-tier stack (ADR-001/002/003) + no paid add-ons in workflows (state in PR).
 - PR evidence: security impact note ("repository automation — least-privilege reviewed"), the grep outputs above, CI run links (red→green demo), pinned-SHA table (action → SHA → version).
-

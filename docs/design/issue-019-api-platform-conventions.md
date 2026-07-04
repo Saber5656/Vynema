@@ -166,7 +166,7 @@ Applied to every `/api` route with method != GET/HEAD/OPTIONS **that uses cookie
 
 ### 8. File layout
 
-```
+```text
 apps/api/src/lib/errors.ts
 apps/api/src/lib/limits.ts
 apps/api/src/lib/validate.ts
@@ -196,4 +196,3 @@ Mount order in `app.ts` (normative): request-id → logger → origin-check → 
 
 - "Consistent error shape" → §2. "Request IDs" → §3. "Rate limits on high-risk endpoints" → §4 table (wired per-route in feature issues; THIS issue wires `auth_login` + `public_search` as examples). "CORS restricted" → §6. "Sensitive values redacted" → §3 redaction test.
 - PR evidence: test output + a sample log line demonstrating redaction.
-

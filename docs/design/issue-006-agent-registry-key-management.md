@@ -73,7 +73,7 @@ Source Task: TSK-1260
 | `POST /api/admin/agents/:id/disable` \| `/enable` | `{reason}` | 200 | enable rejects if status=`revoked` → 409 CONFLICT |
 | `POST /api/admin/agents/:id/revoke` | `{reason}` (required) | 200 | irreversible; also sets ALL its keys to `revoked` in the same `db.batch` |
 | `POST /api/admin/agents/:id/keys` | `{publicKeySpkiB64}` | 201 `{keyId}` | duplicate key_id → 409 CONFLICT |
-| `POST /api/admin/agents/:id/keys/:keyId/retire` \| `/revoke` | `{reason}` for revoke | 200 | retiring the LAST active key is allowed but response includes `warning: "agent has no active keys"` |
+| `POST /api/admin/agents/:id/keys/:keyId/retire` \| `/revoke` | `{reason}` for revoke | 200 | reject the last-active-key case unless a replacement active key is already present; revoking a compromised last key must first disable/revoke the agent in the same audited operation |
 | `POST /api/admin/channels` | `{agentId, slug, name, description}` | 201 ChannelDto | slug regex `^[a-z0-9-]{3,50}$`; unique → 409 |
 | `PATCH /api/admin/channels/:id` | `{name?, description?}` | 200 | freeze/unfreeze is #13's scope |
 
@@ -118,7 +118,5 @@ apps/api/test/admin-agents.test.ts
 
 ### 7. Acceptance mapping & PR evidence
 
-- "Admins create/disable allowlisted agents" → §2; "≥1 active key with key id" → §2 keys + warning; "agents only post to assigned channels" → channel rows bound by `agent_id`, ENFORCED at #8 (state this split in the PR); "revoked agents cannot create upload intents" → §3 context + #7/#8 enforcement tests; "key rotation preserves audit" → §4 test; "public key handling review" → §1 derivation + import validation tests.
+- "Admins create/disable allowlisted agents" → §2; "≥1 active key with key id" → §2 keys + last-active-key rejection; "agents only post to assigned channels" → channel rows bound by `agent_id`, ENFORCED at #8 (state this split in the PR); "revoked agents cannot create upload intents" → §3 context + #7/#8 enforcement tests; "key rotation preserves audit" → §4 test; "public key handling review" → §1 derivation + import validation tests.
 - PR evidence: 3×3 status matrix test output, security impact note (agent identity boundary).
-
-

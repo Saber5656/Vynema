@@ -80,7 +80,7 @@ Source Task: TSK-1260
 
 | File | Key contents |
 |---|---|
-| `emergency-pause.md` | Stop uploads/publication/public reads NOW: `/admin/quotas` toggles; fallback when UI is down: `wrangler d1 execute vynema-db --remote --env production --command "UPDATE platform_config SET value='false', updated_at=<now>, updated_by='runbook' WHERE key='uploads_enabled'"` (same for the other switches). Full media stop: `public_read_enabled` stops discovery APIs only — to stop already-public media bytes, disable the public bucket's public access (custom domain / r2.dev toggle in the Cloudflare dashboard — no deploy) and/or purge cached URLs. Verify: intent → 503, `/api/feed` → 503, media URL → 404/blocked. |
+| `emergency-pause.md` | Stop uploads/publication/public reads NOW: `/admin/quotas` toggles; fallback when UI is down: `wrangler d1 execute vynema-db --remote --env production --command "UPDATE platform_config SET value='false', updated_at=(strftime('%s','now') * 1000), updated_by='runbook' WHERE key='uploads_enabled'"` (same for the other switches). Full media stop: `public_read_enabled` stops discovery APIs only — to stop already-public media bytes, disable the public bucket's public access (custom domain / r2.dev toggle in the Cloudflare dashboard — no deploy) and/or purge cached URLs. Verify: intent → 503, `/api/feed` → 503, media URL → 404/blocked. |
 | `quota-exhaustion.md` | Symptoms (`QUOTA_EXCEEDED` audits, 429s); check `/api/admin/quotas`; decide: raise cap (config, with reason) vs let it bite; reconcile counters vs ledger query (SQL from #14 §6); free space: purge rejected/quarantine objects. |
 | `abuse-spike.md` | Check `/admin/reports` open count by category; batch actions: freeze channel (#13), revoke agent (#6), takedown; tighten caps via config; enable manual-review breathing room by `uploads_enabled=false`; communicate via repo announcement. |
 | `cleanup-failure.md` | `cleanup.run` audit missing or step counts stuck: run steps manually (each cron step is an exported function — invoke via a temporary `wrangler dev` REPL or admin-triggered `POST /api/admin/cron/run` — ADD this admin endpoint in this issue, admin-only, audited `cleanup.run` with `trigger:"manual"`); orphan listing SQL provided. |
@@ -101,6 +101,5 @@ Source Task: TSK-1260
 
 - "Critical operations create safe audit records" → §1 registry covers every mutation in the system + redaction tests; "operators can determine why paused" → §5; "logs contain no secrets" → §1 heuristics + #19 redaction test + §2 list; "runbooks for launch-critical incidents" → §4 (emergency pause, quota, abuse, cleanup, revocation, rollback); "manual verification steps per runbook" → Verification sections.
 - PR evidence: redaction test output, audit page screenshot, runbook verification dates, security note ("observability — no new public surface; one admin-only cron trigger, audited").
-
 
 

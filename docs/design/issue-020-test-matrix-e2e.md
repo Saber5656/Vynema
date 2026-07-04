@@ -58,11 +58,13 @@ Source Task: TSK-1260
 
 ### 1. E2E suite (`e2e/` workspace package, Playwright)
 
-- `e2e/package.json` (`@vynema/e2e`), `playwright.config.ts`: `webServer = { command: "pnpm --filter @vynema/web build && pnpm --filter @vynema/api exec wrangler dev --port 8787", url: "http://127.0.0.1:8787/api/health", timeout: 120000 }`; single `chromium` project; `pnpm test:e2e` at root.
+- `e2e/package.json` (`@vynema/e2e`), `playwright.config.ts`: `webServer = { command: "pnpm --filter @vynema/web build && pnpm --filter @vynema/api exec wrangler dev --port 8787", url: "http://127.0.0.1:8787/api/health", timeout: 120000 }`; single `chromium` project; `workers: 1` for the MVP suite because scenarios mutate shared switches/quotas; `pnpm test:e2e` at root.
 - Seeding (`e2e/seed.ts`, runs in `globalSetup`): bootstrap admin user by direct SQL (`wrangler d1 execute --local`), everything else through the product's own paths — admin API creates agent + channel (#6), #35 CLI performs keygen/upload/finalize against the local dev-upload route (#9 §7.2), review API approves. Fixture video: tiny valid MP4 committed at `e2e/fixtures/tiny.mp4` (< 100 KB, generated once with ffmpeg, provenance note in adjacent README).
 - Auth in E2E: real GitHub OAuth is not scriptable — add a **local-only** login route `POST /api/dev/login {githubLogin, role}` mounted ONLY when `ENVIRONMENT === "local"` (same guard pattern as #9's dev-upload; include the test that it 404s when env≠local). E2E uses it to mint viewer/reviewer/admin sessions.
 
 Journeys (one spec file each):
+
+These specs run serially in CI. Any future parallelization must add explicit state reset/cleanup before and after each spec for global switches, quota caps, seeded users, agents, channels, and media objects.
 
 | Spec | Steps & assertions |
 |---|---|
@@ -106,4 +108,3 @@ Enable `@vitest/coverage-v8` (`coverage.provider: "v8"`, reporter `text` + `json
 
 - "Suite defined and locally runnable" → `pnpm test && pnpm test:e2e` transcript; "critical flows covered" → §1 table; "security boundary tests fail if humans can upload or pending becomes public" → `no-human-upload.spec.ts` + #15 matrix referenced in §2 map; "quota/kill-switch fail-closed" → `quota-killswitch.spec.ts`; "manual storage checklist" → §3.
 - PR evidence: E2E run output (all specs green), traceability map, security note ("adds dev-only login/upload routes — guarded by ENVIRONMENT check + tests").
-

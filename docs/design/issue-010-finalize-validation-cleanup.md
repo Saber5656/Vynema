@@ -37,8 +37,10 @@ Implement the signed finalize endpoint that verifies uploaded object existence, 
 
 ## Dependencies
 
+- AIT-MVP-007.
 - AIT-MVP-008.
 - AIT-MVP-009.
+- AIT-MVP-014.
 
 ## Notes
 
@@ -47,7 +49,7 @@ Implement the signed finalize endpoint that verifies uploaded object existence, 
 ---
 Stable Issue Key: AIT-MVP-010
 Classification: MVP Blocking
-Dependencies: AIT-MVP-008, AIT-MVP-009
+Dependencies: AIT-MVP-007, AIT-MVP-008, AIT-MVP-009, AIT-MVP-014
 Recommended Labels: area/upload, area/storage, area/backend, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -95,9 +97,10 @@ Export `scheduled` handler alongside the fetch handler in `index.ts`. Steps, eac
 
 1. **Expire stale intents**: `UPDATE upload_intents SET status='expired' WHERE status='created' AND expires_at < now - 300000 RETURNING …` (5-min grace for in-flight finalize); for each, release reservation (batch per intent).
 2. **Delete orphan objects** for intents in `failed`/`expired` whose keys still exist: binding `delete()` (no-op if absent), then null the key columns? NO — keep key columns for audit; instead track object deletion via audit metadata. Delete is idempotent by nature.
-3. **Purge rejected-video objects** older than 7 days: videos `status='rejected' AND rejected_at < now-7d AND pending_object_key IS NOT NULL` → delete objects, null `pending_*_key`, release reservation (`rejected_purged`).
-4. **Reconcile public bucket** (defense-in-depth for #11 partial failures): `MEDIA_PUBLIC.list()` (paginate); any key whose leading `{videoId}` is NOT a `published` video → delete + audit `cleanup.public_orphan_removed`. Skip this step if list exceeds 1000 objects (log warning) — MVP scale guard.
-5. **Purge expired rows**: `agent_nonces` (`expires_at < now`), `sessions` (`expires_at < now`), `rate_limits` (`window_start < now - 7200s`).
+3. **Delete publish-crash pending leftovers**: videos already `published` with `pending_object_key` or `pending_thumbnail_key` still set → delete those pending objects, then clear the pending key fields in the video row. This covers #11 crashes after the publish DB batch commits but before post-commit pending deletion.
+4. **Purge rejected-video objects** older than 7 days: videos `status='rejected' AND rejected_at < now-7d AND pending_object_key IS NOT NULL` → delete objects, null `pending_*_key`, release reservation (`rejected_purged`).
+5. **Reconcile public bucket** (defense-in-depth for #11 partial failures): paginate `MEDIA_PUBLIC.list()` in bounded pages; for each page, delete any key whose leading `{videoId}` is NOT a `published` video and audit `cleanup.public_orphan_removed`. If a run reaches its time budget, persist enough cursor/count metadata in `cleanup.run` audit metadata for the next hourly run to continue; do not skip reconciliation merely because the bucket exceeds 1000 objects.
+6. **Purge expired rows**: `agent_nonces` (`expires_at < now`), `sessions` (`expires_at < now`), `rate_limits` (`window_start < now - 7200s`).
 
 ### 3. File layout
 
@@ -133,5 +136,4 @@ All time-dependent tests inject `now` — cron step functions take `(env, nowMs)
 
 - "Only owning active agent can finalize" → 404 + signature tests. "Fails for missing/expired/oversized/mismatched/wrong-key" → table rows. "Creates reviewable submission but not public video" → happy-path assertions + public-bucket check. "Failed attempts audited with safe reasons" → `finalize.failed` rows. "Orphan cleanup idempotent & quota-ledger aware" → cron tests + accounting invariant. Duration/codec validation is explicitly NOT promised (declared values only) — restate in PR.
 - PR evidence: test output, accounting invariant result, security impact note ("upload finalization boundary; object validation fail-closed").
-
 

@@ -63,7 +63,7 @@ Source Task: TSK-1260
 | `GET /api/auth/login?next=<path>` | none | Set `vynema_oauth_state` cookie (random 32B base64url, HttpOnly, Secure, SameSite=Lax, Max-Age 600) carrying `{state, next}` JSON (base64url). 302 to `https://github.com/login/oauth/authorize?client_id=…&state=…` (no scopes — public profile is enough). Rate limit `auth_login` per IP. |
 | `GET /api/auth/callback?code&state` | none | Validate state vs cookie (mismatch/absent → 403 FORBIDDEN). Exchange code (POST `https://github.com/login/oauth/access_token`, `Accept: application/json`). Fetch `https://api.github.com/user` (headers: `Authorization: Bearer`, `User-Agent: vynema`). Upsert user by `github_id`. If `users.status='banned'` → 403 + audit `auth.login_denied`. Create session, set cookie, clear state cookie, 302 to validated `next`. |
 | `POST /api/auth/logout` | session | Delete session row, clear cookie, 200 `{}`. Origin-check applies. |
-| `GET /api/me` | optional session | `200 {user: {id, displayName, role, githubLogin} | null}` |
+| `GET /api/me` | optional session | `200 {user: {id, displayName, role, githubLogin} \| null}` |
 
 `next` validation (open-redirect guard): must start with `/`, must not start with `//` or contain `\` or `..`; else use `/`.
 
@@ -73,7 +73,7 @@ If `GITHUB_OAUTH_CLIENT_ID/SECRET` are unset: `/api/auth/login` returns 503 `SER
 
 - Token: `base64url(crypto.getRandomValues(new Uint8Array(32)))`. Cookie `vynema_session`: HttpOnly; Secure (omit Secure only when `ENVIRONMENT="local"`); SameSite=Lax; Path=/; Max-Age 2592000 (30 d).
 - DB stores `token_hash` = hex SHA-256 of token — raw token exists only in the cookie.
-- Validation on each request: hash cookie value, lookup, reject if expired or user banned. Sliding renewal: if `expires_at - now < 15 d`, extend to now+30 d and update `last_used_at` (single UPDATE, fire-and-forget).
+- Validation on each request: hash cookie value, lookup, reject if expired or user banned. Sliding renewal: if `expires_at - now < 15 d`, extend to now+30 d and update `last_used_at` synchronously so the renewal write is durable.
 - Logout deletes the row (revocation is immediate; no JWT anywhere).
 
 ### 3. Middleware & roles (`apps/api/src/lib/middleware/session.ts`)
@@ -95,9 +95,15 @@ Regression tests in THIS issue (they codify `launch-blocker-checklist.md` "Human
 | Test | Assertion |
 |---|---|
 | session on agent endpoint | `POST /api/agent/upload-intents` with a valid admin session cookie and no signature → 401 `AGENT_AUTH_FAILED` |
-| no human upload routes | walk `app.routes` (Hono exposes the route list): assert NO route matches `/api/(?!agent/)(.*upload.*|.*publish.*)` — i.e. no human-facing upload/publish path exists |
+| no human upload routes | walk `app.routes` (Hono exposes the route list): assert NO route matches the human upload/publish pattern shown below — i.e. no human-facing upload/publish path exists |
 | role escalation | viewer calling a `requireRole("reviewer")` route → 403; reviewer calling admin route → 403 |
 | banned user | banned user's valid session → 401 on `requireUser` routes |
+
+Human upload/publish route deny pattern:
+
+```text
+/api/(?!agent/)(.*upload.*|.*publish.*)
+```
 
 ### 5. File layout
 
@@ -132,4 +138,3 @@ The FIRST admin is promoted manually: `wrangler d1 execute vynema-db --command "
 
 - "Humans can sign in" → §1; "reviewer/admin roles" → §3; "no human role can create upload capability / publish" → §4 tests (cite in PR as boundary evidence); "unauthorized/forbidden consistent and audited" → #19 envelope + §7.
 - PR must include: security impact note (touches human auth boundary), §4 test output, confirmation no secrets committed (`.dev.vars` only).
-

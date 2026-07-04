@@ -59,7 +59,7 @@ Source Task: TSK-1260
 
 ### 1. Config keys & defaults
 
-Exactly the ADR-009 table (repo file `docs/architecture/adr/ADR-009`; 13 keys: 3 kill switches + 10 numeric/string limits, including `per_agent_daily_publications` = 5), seeded by #4's `0002_seed_config.sql`. `getConfig()` (#4) throws `ConfigUnavailableError` when any key is missing → callers translate to 503 deny on capability paths. Config is read fresh per request (no cross-request caching in MVP — correctness over micro-optimization).
+Exactly the ADR-009 table (repo file [`docs/architecture/adr/ADR-009-quotas-kill-switches.md`](../architecture/adr/ADR-009-quotas-kill-switches.md); 13 keys: 3 kill switches + 10 numeric/string limits, including `per_agent_daily_publications` = 5), seeded by #4's `0002_seed_config.sql`. `getConfig()` (#4) throws `ConfigUnavailableError` when any key is missing → callers translate to 503 deny on capability paths. Config is read fresh per request (no cross-request caching in MVP — correctness over micro-optimization).
 
 ### 2. Quota service (`apps/api/src/lib/quota.ts`) — exact API
 
@@ -72,6 +72,8 @@ verifyCountersAfterIncrement(db, cfg, agentId): Promise<QuotaDecision>  // post-
 buildReleaseStatements(args: {agentId, declaredBytes, refId, reason}): D1PreparedStatement[]  // storage gauges -= declared (reservation release / rejected purge)
 checkPublishAllowed(db, cfg, agentId): Promise<QuotaDecision>   // per-agent AND global daily publication caps
 buildPublishedStatements(args): D1PreparedStatement[]       // publications daily +1 (agent + global), ledger
+verifyPublicationCountersAfterIncrement(db, cfg, agentId): Promise<QuotaDecision>  // post-write overshoot check for #11
+buildPublicationCompensationStatements(args): D1PreparedStatement[]  // reverse a reserved publication slot when #11 copy/commit fails
 getQuotaStatus(db, cfg): Promise<QuotaStatusDto>            // all counters vs caps, for admin
 ```
 
@@ -92,7 +94,7 @@ D1 has no SELECT-FOR-UPDATE. Two concurrent intents could both pass §2 checks. 
 2. One `db.batch([...intentInsert, ...buildIntentCreatedStatements()])` — atomic.
 3. `verifyCountersAfterIncrement`: re-read the two daily counters and two gauges; if any now EXCEEDS its cap, run the compensation batch (`mark intent failed` + `buildCleanupStatements` reversing the increments) and return `QUOTA_EXCEEDED`. Net effect: caps may be probed but never durably exceeded; failure mode is over-denial (fail closed), never over-grant.
 
-Document this pattern in the code comment; #8/#11 must follow it.
+Document this pattern in the code comment. #8 follows it for intent/storage reservations. #11 follows the same pattern for publication counters by reserving the publication slot before public copy, verifying, and compensating on cap overshoot or later publish failure.
 
 ### 4. Kill switches & degraded modes (wired in the owning issues, defined here)
 
@@ -145,6 +147,5 @@ apps/api/test/quota.test.ts
 
 - "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → `SERVICE_DEGRADED` wiring (#15 completes; state split in PR); "admins see quota state" → §5.
 - PR evidence: boundary test table output + reconciliation test output + security impact note ("quota/cost boundary — fail-closed verified").
-
 
 

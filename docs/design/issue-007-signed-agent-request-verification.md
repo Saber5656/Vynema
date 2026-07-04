@@ -95,7 +95,7 @@ Order is normative:
 
 Replay containment: nonce uniqueness covers 24 h ≫ the ±300 s freshness window, so a captured request can never be replayed: inside the window the nonce blocks it, outside the timestamp blocks it. Purge of expired nonces = #10's cron.
 
-Also mount `rateLimit("agent_any", …)` (per claimed agentId, keyed pre-verification; fail-closed) in front of the verifier on all agent routes.
+Mount a coarse unauthenticated rate limit before the verifier, keyed by IP/global request shape rather than claimed agent id. Apply `rateLimit("agent_any", …)` only after `requireAgentSignature()` succeeds, keyed by the verified `agentId`, so unauthenticated callers cannot steer or exhaust another agent's bucket.
 
 ### 4. Client guidance (goes into `docs/agents/signing.md`, finished by #18)
 
@@ -140,4 +140,3 @@ docs/agents/signing.md                  # spec §1–§4 verbatim (source of tru
 
 - Every issue acceptance bullet maps to tests: valid pass (1–2), invalid signature/stale/hash/unknown-key/revoked/replay rejections (4–11), nonce expiry safety (§3.6 + purge in #10), no sensitive logging (17), deterministic vectors (16 + #35).
 - PR evidence: full test table output + security impact note ("agent identity boundary — canonicalization & replay") + explicit statement that error responses are non-oracular.
-

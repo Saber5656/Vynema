@@ -22,7 +22,7 @@ This issue exists now as a planning placeholder because the product implementati
 - Define secret handling boundaries: secrets must not be stored in Terraform state unless explicitly accepted.
 - Define resource naming conventions, tags/metadata, and cost/free-tier guardrails.
 - Define drift detection and change review workflow.
-- Align with the deployment pipeline issue for Cloudflare Pages/Workers, D1, R2, DNS, and environment bindings or selected equivalents.
+- Align with the deployment pipeline issue for the selected Cloudflare Worker + Static Assets stack, D1, R2, DNS, and environment bindings.
 
 ## Out Of Scope
 
@@ -110,4 +110,3 @@ Names exactly as in #2's environment table (`vynema-media-pending[-preview]`, et
 ### 7. Acceptance mapping
 
 Ownership policy → §1; resource list → §2 module (per approved providers); state backend/access → §2; secrets → §3; env separation → §2 env dirs; drift/manual-change policy → §4; follow-up tasks → §6.5.
-

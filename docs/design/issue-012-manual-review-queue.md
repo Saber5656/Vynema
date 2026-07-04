@@ -57,14 +57,14 @@ Source Task: TSK-1260
 
 > Normative. Prerequisites: #4, #5 (`requireRole`), #9 (presigner), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), #14 (switch behavior). Coordinate: this issue passes its `moderation_reviews` INSERT into #11's commit batch via the `extraStatements` parameter (see #11 §2 note).
 
-### 1. API (all `requireRole("reviewer")` + origin-check)
+### 1. API (GET routes `requireRole("reviewer" | "admin")`; approve/reject `requireRole("reviewer")`; all origin-check)
 
 | Method & path | Body | Success | Notes |
 |---|---|---|---|
 | `GET /api/moderation/queue?cursor&limit` | — | 200 `{items: QueueItemDto[], nextCursor}` | videos `status='pending_review'`, oldest first (`created_at ASC, id ASC` — FIFO fairness), uses `idx_videos_review_queue` |
 | `GET /api/moderation/videos/:id` | — | 200 QueueItemDetailDto | any status (reviewers may inspect history) |
 | `GET /api/moderation/videos/:id/preview-url` | — | 200 `{url, expiresAt}` | ONLY for `pending_review` videos → else 409 `CONFLICT`. Presigned **GET** on the pending object, TTL 600 s. Audit `moderation.preview_issued` (actor, videoId). This is the single sanctioned private-media read path. |
-| `POST /api/moderation/videos/:id/approve` | `{reason?: string}` (default `"approved"`) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]` |
+| `POST /api/moderation/videos/:id/approve` | `{reason: string}` (REQUIRED, 1–2000) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]` |
 | `POST /api/moderation/videos/:id/reject` | `{reason: string}` (REQUIRED, 1–2000) | 200 VideoDto | calls `rejectVideo` with the review INSERT |
 
 `QueueItemDto`: `{videoId, title, description, durationSeconds, sizeBytes, submittedAt, agent: {id, displayName, status}, channel: {id, slug, name, status}, provenance, quota: {agentDailyIntentsUsed, agentStorageUsed}}` — quota context via #14 `getQuotaStatus` filtered per agent (gives the reviewer abuse context).
@@ -77,7 +77,7 @@ Preview-URL addition to #9's presigner: `presignPendingGet(env, {key, expiresSec
 
 - Route guard: render only when `useMe()` role ∈ {reviewer, admin}; otherwise redirect `/` (server still enforces — the guard is UX only; add a comment saying exactly that).
 - Queue page: table (submitted at, title, agent, channel, size, duration) sorted oldest-first, cursor "Load more", count badge, empty state "Queue is clear".
-- Detail page: metadata + provenance panel (render all values as plain text), a declared-vs-observed duration line (the player exposes the actual duration; reviewers MUST reject on material mismatch with the declared value — this is the MVP's actual-duration enforcement point per ADR-009 Notes), `<video controls src={previewUrl}>` fetched on demand via the preview-url endpoint (re-fetch on expiry error), Approve button (confirm dialog, optional reason) and Reject button (dialog with REQUIRED reason textarea). On success: toast + navigate back + invalidate queue query. On 503 `PUBLICATION_DISABLED`: banner "Publication is currently paused by kill switch — reject still available".
+- Detail page: metadata + provenance panel (render all values as plain text), a declared-vs-observed duration line (the player exposes the actual duration; reviewers MUST reject on material mismatch with the declared value — this is the MVP's actual-duration enforcement point per ADR-009 Notes), `<video controls src={previewUrl}>` fetched on demand via the preview-url endpoint (re-fetch on expiry error), Approve button (confirm dialog with REQUIRED reason textarea) and Reject button (dialog with REQUIRED reason textarea). On success: toast + navigate back + invalidate queue query. On 503 `PUBLICATION_DISABLED`: banner "Publication is currently paused by kill switch — reject still available".
 - No bulk actions in MVP.
 
 ### 3. Tests (`apps/api/test/moderation-review.test.ts` + component tests)
@@ -105,5 +105,4 @@ UI component tests: role guard redirect; reject requires reason; kill-switch ban
 
 - "Finalized submissions appear in queue" → queue test; "approve/reject with required reason" → §1/§3; "approved proceed to publication" → via #11; "rejected remain non-public and auditable" → reject test + #15 filter; "unauthorized users cannot access" → 403 tests.
 - PR evidence: §3 table output, screenshot of queue + detail + reject dialog, security impact note ("maintainer authorization boundary; sanctioned pending-media read path with audit").
-
 

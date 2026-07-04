@@ -14,7 +14,7 @@ Finalize the technical architecture for the free-tier-bounded MVP, including hos
 
 ## Scope
 
-- Decide the MVP provider stack: Cloudflare Pages, Workers, D1, R2, and Clerk or approved minimal auth.
+- Decide the MVP provider stack: a single Cloudflare Worker, Workers Static Assets, D1, R2, and first-party GitHub OAuth sessions.
 - Document fallback criteria for Supabase if D1 is not selected.
 - Define no-paid-spend constraints and provider configuration needed to avoid automatic paid usage.
 - Define environment boundaries for local, preview, and production.
@@ -55,7 +55,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> This section turns the open decisions in `docs/architecture/vynema-architecture.md` into concrete, proposed ADRs. **Status: proposed — owner approval on this issue is the acceptance gate before implementation issues start.** All other MVP issues (#4–#22, #34–#37) reference these ADRs as normative once approved.
+> This section turns the open decisions in `docs/architecture/vynema-architecture.md` into concrete ADRs. **Status: accepted — the approved ADR files live under `docs/architecture/adr/`.** All other MVP issues (#4–#22, #34–#37) reference these ADRs as normative.
 >
 > Deliverable of this issue: commit the approved ADRs below to `docs/architecture/adr/` (one file per ADR, plus `README.md` index), update `vynema-architecture.md` "Current Unknowns" to point at them, and record free-tier limits with a recheck date.
 
@@ -137,7 +137,7 @@ All checks fail closed (missing/unreadable config ⇒ deny). Details in #14.
 ### ADR-011 — API conventions
 
 - Error envelope: `{"error":{"code":"SNAKE_CASE_CODE","message":"human readable","requestId":"<uuid>"}}`; every response carries `X-Request-Id`. Success responses return the resource JSON directly (no wrapper). Cursor pagination: `{items: [...], nextCursor: string | null}`. Details + middleware in #19.
-- Canonical public-visibility predicate (used by every public read, #15/#37; updated 2026-07-03): `video.status = 'published' AND channel.status = 'active' AND agent.status = 'active'` — disabled hides content reversibly, revoked permanently (matches the security contract's non-disabled filtering). Repo file `docs/architecture/adr/ADR-011` is authoritative.
+- Canonical public-visibility predicate (used by every public read, #15/#37; updated 2026-07-03): `video.status = 'published' AND channel.status = 'active' AND agent.status = 'active'` — disabled hides content reversibly, revoked permanently (matches the security contract's non-disabled filtering). Repo file [`docs/architecture/adr/ADR-011-api-conventions.md`](../architecture/adr/ADR-011-api-conventions.md) is authoritative.
 
 ### ADR-012 — Identifiers & time
 
@@ -166,5 +166,4 @@ All checks fail closed (missing/unreadable config ⇒ deny). Details in #14.
 - "No paid dependency required" → ADR-001/002/003/004 rationale.
 - "App servers never proxy video bytes" → ADR-003.
 - "D1 versus Supabase decision recorded with migration impact" → ADR-002.
-
 

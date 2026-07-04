@@ -16,7 +16,7 @@ Split out of #18: #18 keeps documentation and the admin status view; this issue 
 
 ## Scope
 
-- Node.js CLI under `tools/agent-cli` with commands: `keygen`, `sign`, `upload`, `status`.
+- Node.js CLI under `tools/agent-cli` with commands: `keygen`, `sign`, `upload`, `status`, `test-vectors`.
 - Deterministic signing test-vector generator + committed vectors file shared with #7's verifier tests.
 - Documentation of CLI usage in `docs/agents/reference-client.md`.
 
@@ -83,15 +83,15 @@ signature = base64(ed25519_sign(privateKey, utf8(canonical)))
 ### 4. Upload flow (`client.ts`, command `upload`)
 
 ```
-vynema-agent upload --base-url http://127.0.0.1:8787 --agent-id <id> --key ~/.vynema/agent-key.pem \
+vynema-agent upload --base-url http://127.0.0.1:8787 --allow-insecure-http --agent-id <id> --key ~/.vynema/agent-key.pem \
   --channel <channelId> --file ./video.mp4 [--thumbnail ./thumb.jpg] \
   --title "..." --description "..." --model "gen-model-name" --prompt-summary "..."
 ```
 
 1. Compute `sha256` + byte size of the MP4 (and thumbnail if given).
 2. `POST /api/agent/upload-intents` (signed) with the JSON body defined in #8 §API contract.
-3. Receive `{intentId, video: {uploadUrl, key}, thumbnail?: {...}, expiresAt}`.
-4. `PUT` the file bytes to `uploadUrl` with `content-type: video/mp4` and `content-length`. No signing headers (the URL itself is the capability). Retry once on network failure; abort if HTTP status ≥ 400.
+3. Receive `{intentId, video: {uploadUrl, key, requiredHeaders}, thumbnail?: {uploadUrl, key, requiredHeaders}, expiresAt}`.
+4. `PUT` the file bytes to `uploadUrl` with EXACTLY the returned `requiredHeaders` map for that object, including signed `content-type`, `content-length`, and checksum headers. No Vynema signing headers are sent on the R2 PUT (the URL itself is the capability). Retry once on network failure; abort if HTTP status ≥ 400.
 5. `POST /api/agent/upload-intents/{intentId}/finalize` (signed, empty JSON body `{}`).
 6. Print resulting state (`pending_review`) and video id.
 7. `status --video <id>` calls `GET /api/agent/videos/{id}` (signed) and prints status.
@@ -100,28 +100,27 @@ All HTTP via global `fetch` (Node 22). Print the request id from `x-request-id` 
 
 ### 5. Test vectors (`vectors.ts`)
 
-- Fixed inputs (hardcoded): seed private key = PKCS8 PEM committed at `docs/agents/test-fixtures/test-agent-key.pem` (CLEARLY marked test-only; generated once, never used by a real agent), agentId `agt_testvector01`, timestamp `1750000000`, nonce `00000000-0000-4000-8000-000000000001`, and three request cases: empty body GET, JSON body POST, and finalize POST.
-- Output `docs/agents/signing-test-vectors.json`: array of `{name, method, path, body, timestamp, nonce, agentId, keyId, bodySha256, canonicalString, signature, publicKeySpkiBase64}`.
+- Fixed inputs (hardcoded): deterministic public test vector seed stored as non-secret bytes in `vectors.ts`; `vectors.ts` derives or mocks an Ed25519 test key at generation time and never commits a PKCS8 private key file. Use agentId `agt_testvector01`, timestamp `1750000000`, nonce `00000000-0000-4000-8000-000000000001`, and three request cases: empty body GET, JSON body POST, and finalize POST.
+- Output `docs/agents/signing-test-vectors.json`: array of `{name, method, path, body, timestamp, nonce, agentId, keyId, bodySha256, canonicalString, signature, publicKeySpkiBase64}`. The committed JSON must contain no private key material.
 - `test/signing.test.ts` regenerates and deep-equals against the committed file. Issue #7's verifier test imports the same JSON and must verify every vector.
 
 ### 6. Step-by-step order
 
-1. `signing.ts` + unit tests (pure, no network). 2. `keys.ts` + keygen command. 3. `vectors.ts` + committed vectors + fixture key. 4. `client.ts` against mocked `fetch` (vitest `vi.stubGlobal`). 5. `cli.ts` wiring + `docs/agents/reference-client.md`. Checkpoint after each step: `pnpm --filter @vynema/agent-cli test`.
+1. `signing.ts` + unit tests (pure, no network). 2. `keys.ts` + keygen command. 3. `vectors.ts` + committed vectors generated without any private-key fixture file. 4. `client.ts` against mocked `fetch` (vitest `vi.stubGlobal`). 5. `cli.ts` wiring + `docs/agents/reference-client.md`. Checkpoint after each step: `pnpm --filter @vynema/agent-cli test`.
 
 ### 7. Security guardrails
 
-- The committed fixture private key must contain the string `TEST VECTOR ONLY - NOT A SECRET` in an adjacent README and must never be registered in any real environment. Add it to `scripts/security/scan-secrets.py` allowlist if the scanner flags it, with a comment referencing this issue.
+- Do not commit private keys, including test-only PKCS8 PEM fixtures. Generate or mock signing keys during test/vector generation so `scripts/security/scan-secrets.py` does not need an allowlist exception.
 - CLI refuses to run `upload` against a non-`https` base URL unless `--allow-insecure-http` is passed (local dev).
 
 ### 8. PR / evidence checklist
 
 - [ ] Vector regeneration test green; #7 cross-verification test green (or explicitly noted as pending until #7 merges).
 - [ ] Demo transcript of `upload` against local dev (once #8/#10 exist) or against mock.
-- [ ] Security note: fixture key is test-only, no real secrets.
+- [ ] Security note: vectors contain no private key material and require no secret-scanner allowlist entry.
 
 ---
 Stable Issue Key: AIT-MVP-027
 Classification: MVP Blocking
 Dependencies: #34, #7, #8, #10
 Labels: area/agent-api, area/testing, type/implementation, priority/p0, mvp-blocking
-

@@ -94,7 +94,7 @@ directory.
 
 | File | Issue |
 |---|---|
-| Launch readiness content stays on issue [#24](https://github.com/Saber5656/Vynema/issues/24) (checklist-only, no separate design section) |
+| _Launch readiness content stays on issue_ | [#24](https://github.com/Saber5656/Vynema/issues/24) (checklist-only, no separate design section) |
 
 ## Post-MVP
 

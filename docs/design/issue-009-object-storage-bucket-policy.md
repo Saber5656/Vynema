@@ -97,14 +97,13 @@ public bucket:
 
 ### 5. Provisioning & lifecycle (manual commands now; #29 owns IaC posture)
 
-```
+```sh
 wrangler r2 bucket create vynema-media-pending
 wrangler r2 bucket create vynema-media-public
-wrangler r2 bucket lifecycle add vynema-media-pending --prefix pending/ --expire-days 7
-wrangler r2 bucket lifecycle add vynema-media-pending --abort-multipart-days 1   # (flag names: verify against current wrangler; intent is: expire pending/ after 7d, abort incomplete multipart after 1d)
+wrangler r2 bucket lifecycle add vynema-media-pending --abort-multipart-days 1   # (flag names: verify against current wrangler; intent is: abort incomplete multipart uploads after 1d)
 ```
 
-- 7-day expiry on `pending/` is defense-in-depth behind #10's hourly cleanup (which normally deletes orphans in ≤1 h). `quarantine/` prefix has NO expiry (evidence retention until manual purge).
+- Do not configure a broad provider-level expiry on `pending/`: finalized uploads in `pending_review` still use pending object keys until review approval or rejection, and must not be deleted by an age-only rule. Let #10's DB-aware cleanup delete only failed/expired or publish-crash orphans. `quarantine/` prefix has NO expiry (evidence retention until manual purge).
 - Enable r2.dev on the public bucket only; record the URL as `PUBLIC_MEDIA_BASE_URL`.
 - Preview-environment buckets: same commands with `-preview` suffix.
 
@@ -127,4 +126,3 @@ Run these once against the preview environment when #21 provisions it and paste 
 
 - "Direct upload with scoped short-lived capability" → §4 presign (900 s, single key, header-bound). "Pending objects not publicly accessible" → §1 posture + §6 checks 1–2. "Public playback only after review" → public bucket contains only #11-copied objects. "Keys unguessable/authorization-safe" → §2 UUIDs + §1 list-denial. "Bucket policy prevents broad access" → §3 token scope + §6. "CORS restricted" → §1 (none, with rationale).
 - PR evidence: presigner test output, storage-policy doc, security impact note ("storage capability boundary; no public access to pending").
-

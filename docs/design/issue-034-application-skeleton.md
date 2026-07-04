@@ -32,7 +32,7 @@ This issue was split out because issues #4–#22 all implicitly assume an existi
 ## Acceptance Criteria
 
 - [ ] `pnpm install && pnpm build && pnpm test && pnpm lint && pnpm typecheck` all succeed from the repo root on a clean checkout.
-- [ ] `pnpm dev` starts a local server; `GET /api/health` returns `{"status":"ok"}` and `/` serves the SPA shell.
+- [ ] `pnpm dev` starts a local server; `GET /api/health` returns the documented health payload, including `environment`, and `/` serves the SPA shell.
 - [ ] No secrets are committed; `.dev.vars.example` documents required local variables with dummy values.
 - [ ] Repository layout matches the design below exactly.
 - [ ] `docs/development.md` lets a new contributor run the stack with copy-paste commands.
@@ -62,7 +62,7 @@ This issue was split out because issues #4–#22 all implicitly assume an existi
 
 ### 2. Directory layout (create exactly this)
 
-```
+```text
 /package.json                 # root: workspace scripts only, "private": true
 /pnpm-workspace.yaml
 /.nvmrc
@@ -299,6 +299,5 @@ Stable Issue Key: AIT-MVP-026
 Classification: MVP Blocking
 Dependencies: #2
 Labels: area/platform, area/infra, type/implementation, priority/p0, mvp-blocking
-
 
 

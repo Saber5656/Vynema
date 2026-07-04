@@ -85,12 +85,13 @@ Sequence:
 
 1. Load video. `status == "published"` → **return `{alreadyPublished: true, video}` (idempotent success — approval retries are safe).** Else `assertTransition(status, "published")` → 409 `CONFLICT` if illegal.
 2. Guards (all fail-closed): `publication_enabled` config true else 503 `PUBLICATION_DISABLED`; `checkPublishAllowed` (#14, per-agent AND global daily caps) else 429 `QUOTA_EXCEEDED`; channel `active` else 409 `CONFLICT` (details `channel_frozen`); agent `active` else 409 (details `agent_not_active`) — video stays `pending_review`.
-3. Storage copies (via #9 adapter, S3 CopyObject server-side): `pending/{…}/video.mp4` → public `{videoId}/video.mp4`; thumbnail likewise when present. Copy failures → audit `publish.failed`, respond 503, **no state change** (copies are idempotent overwrites; retry by re-approving).
-4. Commit batch (single `db.batch`): video → `published`, `published_at = now`, `public_object_key`/`public_thumbnail_key` set, `pending_*_key` nulled + `buildPublishedStatements()` (#14) + audit `publish.ok` (actor: reviewer user id).
-5. After commit (best-effort): delete pending objects (storage net-0 per #10 accounting). Failure → log; #10 cron step 2 will retire them.
-6. Return the published video.
+3. Reserve the publication quota before storage copy using #14's check → batch-increment → verify → compensate pattern for both per-agent and global publication counters. If the post-increment verification exceeds a cap, reverse the counter increment, audit `publish.quota_denied`, and return 429 before any public object is created or video row is exposed.
+4. Storage copies (via #9 adapter, S3 CopyObject server-side): `pending/{…}/video.mp4` → public `{videoId}/video.mp4`; thumbnail likewise when present. Copy failures → reverse the publication quota reservation, audit `publish.failed`, respond 503, **no state change** (copies are idempotent overwrites; retry by re-approving).
+5. Commit batch (single `db.batch`): video → `published`, `published_at = now`, `public_object_key`/`public_thumbnail_key` set, keep `pending_*_key` populated until pending deletion succeeds, and audit `publish.ok` (actor: reviewer user id). If this batch fails, reverse the publication quota reservation and delete copied public objects best-effort before returning 503/409.
+6. After commit (best-effort): delete pending objects (storage net-0 per #10 accounting), then clear `pending_*_key` in an idempotent DB update. Failure → log; #10 cron step 3 will retire them and clear the pending keys.
+7. Return the published video.
 
-Partial-failure notes (why this order is safe): copy-then-commit means a crash after step 3 leaves an unreferenced public object at an unguessable UUID key — #10 cron step 4 (public-bucket reconcile) removes it; a crash after step 4 leaves pending objects — cron step 2 removes them. No ordering leaves a public object for a non-published video past one cron cycle.
+Partial-failure notes (why this order is safe): quota reservation happens before public copy and is compensated on deny/failure; copy-then-commit means a crash after storage copy leaves an unreferenced public object at an unguessable UUID key — #10 cron step 5 (public-bucket reconcile) removes it; a crash after the DB commit leaves pending objects — #10 cron step 3 removes them. No ordering leaves a public object for a non-published video past one cron cycle.
 
 ### 3. `rejectVideo(env, {videoId, reviewerUserId, reason})` (called by #12)
 
@@ -98,7 +99,7 @@ Partial-failure notes (why this order is safe): copy-then-commit means a crash a
 
 ### 4. `takedownVideo(env, {videoId, actorUserId, reason})` (called by #13; mechanics here so state stays in one module)
 
-`assertTransition("published","taken_down")`; storage: copy public `{videoId}/video.mp4` → pending `quarantine/{videoId}/video.mp4` (evidence), then delete public objects; then, when a Cloudflare custom domain fronts the public bucket, purge the video/thumbnail URLs via the Cloudflare purge-by-URL API (zone-scoped token as Worker secret `CF_CACHE_PURGE_TOKEN` + `CF_ZONE_ID`, added to #34's env list; on pre-alpha r2.dev, skip with a logged warning). Public objects carry `cache-control: public, max-age=3600` (#9) so even a failed purge is bounded to 1 h; batch: status `taken_down`, `taken_down_at`, `takedown_reason`, null public keys, set `pending_object_key = quarantine key`; audit `takedown.ok`. Public URL must 404 afterwards (test).
+`assertTransition("published","taken_down")`; storage first: copy public `{videoId}/video.mp4` → pending `quarantine/{videoId}/video.mp4` (evidence), then delete public objects; then, when a Cloudflare custom domain fronts the public bucket, purge the video/thumbnail URLs via the Cloudflare purge-by-URL API (zone-scoped token as Worker secret `CF_CACHE_PURGE_TOKEN` + `CF_ZONE_ID`, added to #34's env list; on pre-alpha r2.dev, skip with a logged warning). The DB row MUST stay `published` until quarantine copy, public delete, and required purge steps succeed. If delete or purge fails, audit `takedown.failed` with a safe reason, keep the row published with public keys intact, and allow retry/compensation instead of writing terminal `taken_down`. Only after storage/purge success does the batch set status `taken_down`, `taken_down_at`, `takedown_reason`, null public keys, set `pending_object_key = quarantine key`, and audit `takedown.ok`. Public URL must 404 afterward (test).
 
 ### 5. Provenance & disclosure invariants (FR-008/FR-009)
 
@@ -134,6 +135,4 @@ apps/api/test/publication.test.ts
 
 - "Pending/rejected never in public APIs" → #15's filter + §7 public-bucket assertions here. "Approved creates exactly one public asset" → UNIQUE intent_id + idempotent publish test. "AI/provenance labels" → §5. "Transitions audited" → `publish.ok/rejected/failed`, `takedown.ok`. "Idempotent retry no duplicates" → re-approve test.
 - PR evidence: transition-matrix test output, orphan-reconcile test output, security impact note ("public/private transition boundary").
-
-
 
