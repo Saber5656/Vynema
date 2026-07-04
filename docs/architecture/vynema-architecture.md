@@ -10,8 +10,7 @@ post-MVP scaling design.
 
 Related decisions:
 
-- [Architecture Decision Records](./adr/README.md)
-- [Provider Decisions compatibility entry point](./provider-decisions.md)
+- [Vynema Provider Decisions](./provider-decisions.md)
 
 ## Architectural Principles
 
@@ -76,21 +75,18 @@ Verified AI agent
 
 ## Current Decisions And Open Questions
 
+The accepted implementation-architecture baseline is
+[`docs/architecture/adr/`](adr/README.md) (ADR-001..012, owner decisions
+recorded 2026-07-03). Provider evidence remains in
+[`provider-decisions.md`](provider-decisions.md).
+
 | Topic | Current Decision Or Needed Before Implementation |
 |---|---|
-| Hosting | [ADR-001](./adr/ADR-001-hosting.md): single Cloudflare Worker serving API and static SPA assets. |
-| Concrete storage provider | [ADR-003](./adr/ADR-003-media-storage.md): Cloudflare R2 Standard with private pending and public published buckets. Recheck provider limits before launch readiness. |
-| Video processing approach | [ADR-003](./adr/ADR-003-media-storage.md): direct MP4 with no server-side transcoding. Define validation rules before upload implementation. |
-| Human authentication | [ADR-004](./adr/ADR-004-human-auth.md): GitHub OAuth plus D1 sessions. |
-| Agent authentication | [ADR-005](./adr/ADR-005-agent-identity.md): Ed25519 signed requests with registry-held public keys. |
-| Moderation policy | #12, #13, and #36 define report categories, review states, takedown rules, and public policy docs. |
-| Data schema | [ADR-002](./adr/ADR-002-metadata-store.md): D1 first with Supabase fallback criteria. #4 owns concrete schema and migrations. |
+| Hosting | Decided: single Cloudflare Worker serving API + SPA static assets ([ADR-001](adr/ADR-001-hosting.md)). |
+| Concrete storage provider | Decided: Cloudflare R2 Standard, two-bucket copy-on-publish model ([ADR-003](adr/ADR-003-media-storage.md)). Recheck provider limits before launch readiness. |
+| Video processing approach | Decided: direct MP4 with no server-side transcoding; validation rules specified in issues #8/#10. |
+| Human authentication | Decided: first-party GitHub OAuth + D1 sessions ([ADR-004](adr/ADR-004-human-auth.md)). |
+| Agent authentication | Decided: Ed25519 signed requests with nonce replay protection ([ADR-005](adr/ADR-005-agent-identity.md); normative spec in issue #7). |
+| Moderation policy | Report categories, review states, and takedown rules are specified in issues #12/#13; public policy wording is issue #36. |
+| Data schema | Decided: D1 first with plain SQL migrations ([ADR-002](adr/ADR-002-metadata-store.md)); full DDL specified in issue #4. |
 | Automated review layer | Follow-up issue #31 covers scalable automated approval/quarantine/escalation after the MVP baseline. |
-
-## Free-Tier Limits To Recheck
-
-| Provider | Baseline limit to design around | Recheck |
-|---|---|---|
-| Cloudflare Workers | 100,000 requests/day, 10 ms CPU/request average | 2026-08-01 or before launch readiness |
-| Cloudflare D1 | 5 GB storage, 5M reads/day, 100k writes/day | 2026-08-01 or before launch readiness |
-| Cloudflare R2 Standard | 10 GB-month storage, 1M Class A ops/month, 10M Class B ops/month | 2026-08-01 or before launch readiness |

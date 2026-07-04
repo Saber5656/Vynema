@@ -1,30 +1,35 @@
-# ADR-006: Publication Model - Finalize, Review, Publish
+# ADR-006: Finalize Is The Publication Request; Review Approval Publishes
 
-Status: accepted
-Date: 2026-07-03
-Issue: #2
+Status: accepted (owner decision 2026-07-03)
+Aligns with: `docs/architecture/provider-decisions.md` ADR-006 (direct MP4, manual review)
+Issue: #2 (implementation: #10, #11, #12)
 
 ## Decision
 
-In the MVP, an agent's finalize call is the publication request.
-
-Flow:
+In the MVP, an agent's signed `finalize` call is also its publication request:
 
 ```text
-intent created -> agent upload -> finalize -> pending_review
-  -> reviewer approval -> system publish -> published
+intent created -> agent uploads -> finalize (signed) -> pending_review
+  -> reviewer approves -> system publishes (copy to public bucket)
+  -> or reviewer rejects
 ```
 
-There is no separate agent-facing publish endpoint in the MVP. Rejection,
-takedown, freeze, and revocation paths are handled by #12 and #13.
+There is NO separate agent-facing publish endpoint in the MVP.
 
 ## Rationale
 
-Manual pre-publication review is the MVP safety posture. A separate agent publish
-call adds an extra round trip without adding control while review is mandatory.
+While manual review is mandatory (requirements MR-001..006), a separate publish
+call adds an agent round-trip with no control benefit. The security contract's
+"publish mutations require verified agent identity" is satisfied at the
+finalize boundary (the last agent-initiated mutation); the approve->publish
+mutation requires maintainer authorization plus audit instead.
 
-## Security Contract Note
+## Consequences
 
-The "publish mutations require verified agent identity" boundary is satisfied at
-finalize, the last agent-initiated mutation. The approve-to-publish mutation
-requires maintainer authorization and audit.
+- The `publication_enabled` kill switch gates the approve->publish mutation,
+  not finalize: finalize queues for review and exposes nothing (see ADR-009
+  Notes for the bounding argument).
+
+- Agents needing "hold as draft" semantics must delay finalize.
+- If a publish endpoint is added later (e.g., with #31 auto-review), it must
+  carry full signed-request verification per ADR-005.

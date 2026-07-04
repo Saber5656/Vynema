@@ -1,18 +1,20 @@
-# ADR-008: Testing
+# ADR-008: Vitest Pool Workers For API Tests, Playwright For E2E
 
-Status: accepted
-Date: 2026-07-03
-Issue: #2
+Status: accepted (owner decision 2026-07-03)
+Issue: #2 (implementation: #20, #34)
 
 ## Decision
 
-- API tests run inside workerd using `@cloudflare/vitest-pool-workers` with real
-  local D1/R2 bindings.
-- Frontend unit tests use Vitest with happy-dom.
-- E2E tests use Playwright against `wrangler dev`.
+- API unit/integration tests run inside workerd via
+  `@cloudflare/vitest-pool-workers` with real local D1/R2 bindings (no
+  hand-rolled platform mocks).
+- Frontend unit tests: Vitest + happy-dom.
+- E2E: Playwright against `wrangler dev`, seeded through the product's own
+  APIs plus local-only dev routes that are hard-guarded to
+  `ENVIRONMENT === "local"`.
 
 ## Rationale
 
-The most security-sensitive behavior depends on Workers, D1, and R2 semantics.
-Testing the API inside workerd reduces drift from production behavior and avoids
-hand-rolled mocks for platform APIs.
+Testing against the real Workers runtime and real (local) D1/R2 semantics
+catches platform-behavior bugs that mocks hide, and it is the officially
+supported Cloudflare path.

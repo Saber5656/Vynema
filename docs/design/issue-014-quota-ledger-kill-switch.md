@@ -59,7 +59,7 @@ Source Task: TSK-1260
 
 ### 1. Config keys & defaults
 
-Exactly the ADR-009 table (repo file [`docs/architecture/adr/ADR-009-quotas-kill-switches.md`](../architecture/adr/ADR-009-quotas-kill-switches.md); 13 keys: 3 kill switches + 10 numeric/string limits, including `per_agent_daily_publications` = 5), seeded by #4's `0002_seed_config.sql`. `getConfig()` (#4) throws `ConfigUnavailableError` when any key is missing → callers translate to 503 deny on capability paths. Config is read fresh per request (no cross-request caching in MVP — correctness over micro-optimization).
+Exactly the ADR-009 table (repo file [`docs/architecture/adr/ADR-009-quota-defaults.md`](../architecture/adr/ADR-009-quota-defaults.md); 13 keys: 3 kill switches + 10 numeric/string limits, including `per_agent_daily_publications` = 5), seeded by #4's `0002_seed_config.sql`. `getConfig()` (#4) throws `ConfigUnavailableError` when any key is missing → callers translate to 503 deny on capability paths. Config is read fresh per request (no cross-request caching in MVP — correctness over micro-optimization).
 
 ### 2. Quota service (`apps/api/src/lib/quota.ts`) — exact API
 
@@ -147,5 +147,4 @@ apps/api/test/quota.test.ts
 
 - "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → `SERVICE_DEGRADED` wiring (#15 completes; state split in PR); "admins see quota state" → §5.
 - PR evidence: boundary test table output + reconciliation test output + security impact note ("quota/cost boundary — fail-closed verified").
-
 

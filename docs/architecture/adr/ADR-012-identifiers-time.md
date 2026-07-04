@@ -1,20 +1,13 @@
-# ADR-012: Identifiers And Time
+# ADR-012: Identifiers And Time Representation
 
-Status: accepted
-Date: 2026-07-03
-Issue: #2
+Status: accepted (owner decision 2026-07-03)
+Issue: #2 (implementation: #4)
 
 ## Decision
 
-- Primary keys are UUID v4 `TEXT` generated with `crypto.randomUUID()`.
-- Agent display ids are prefixed: `agt_` plus 12 lowercase hex chars.
-- Database timestamps are integer epoch milliseconds.
-- API timestamps are ISO 8601 UTC strings.
-- Agent-signature timestamps are epoch seconds strings.
-
-## Rationale
-
-UUID primary keys keep schema simple. A prefixed agent id improves registry UX.
-Epoch milliseconds are easy to sort and compare in D1, while ISO strings are
-friendlier at API boundaries. Signing uses seconds only because it is a compact
-freshness input.
+- Primary keys: UUID v4 TEXT (`crypto.randomUUID()`); agents use display ids
+  `agt_` + 12 hex.
+- Database timestamps: INTEGER epoch milliseconds.
+- API timestamps: ISO 8601 UTC strings.
+- Agent-signature timestamps: unix epoch SECONDS as a decimal string — the only
+  seconds-based timestamp in the system (see #7).

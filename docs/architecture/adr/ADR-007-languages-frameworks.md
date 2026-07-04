@@ -1,18 +1,22 @@
-# ADR-007: Languages And Frameworks
+# ADR-007: TypeScript Strict, Hono, Vite + React SPA, pnpm 10 Workspaces
 
-Status: accepted
-Date: 2026-07-03
-Issue: #2
+Status: accepted (owner decision 2026-07-03)
+Issue: #2 (implementation: #34)
 
 ## Decision
 
-- TypeScript strict mode throughout the repo.
-- API: Hono on Cloudflare Workers.
-- Frontend: Vite React SPA with react-router-dom and TanStack Query.
-- Shared request/response contracts and zod schemas in `packages/shared`.
-- pnpm workspaces monorepo.
+- TypeScript `strict` everywhere.
+- API: Hono ^4 on Cloudflare Workers.
+- Frontend: Vite + React SPA + react-router-dom + TanStack Query; plain CSS
+  Modules (no Tailwind/UI kit).
+- Shared request/response types and zod schemas in `packages/shared`.
+- pnpm 10 workspaces monorepo (`apps/api`, `apps/web`, `packages/shared`,
+  `tools/`). pnpm 10 blocks dependency lifecycle (install) scripts by default;
+  keep that default as a supply-chain control and allowlist exceptions
+  explicitly via `pnpm.onlyBuiltDependencies` (expected: none).
 
 ## Rationale
 
-This is the smallest well-trodden stack for a Workers JSON API and SPA while
-keeping contracts typed across API, web, and reference CLI code.
+Smallest well-trodden stack for Workers with typed contracts shared end to end.
+The dependency set is deliberately minimal (Hono, zod, aws4fetch, React
+toolchain) to bound supply-chain exposure.

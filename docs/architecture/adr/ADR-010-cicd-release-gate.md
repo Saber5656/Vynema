@@ -1,28 +1,22 @@
-# ADR-010: CI/CD And Release Gate
+# ADR-010: CI Is Checks-Only; Deploy Is A Gated Manual Workflow
 
-Status: accepted
-Date: 2026-07-03
-Issue: #2
+Status: accepted (owner decision 2026-07-03)
+Issue: #2 (implementation: #21)
 
 ## Decision
 
-GitHub Actions CI performs install, lint, typecheck, tests, and build only.
-
-Repository automation requirements:
-
-- Top-level workflow permissions are least-privilege.
-- No `pull_request_target` for public fork code.
-- No self-hosted runners for public fork PRs.
-- Third-party actions are pinned to full-length commit SHAs.
-- Secret scanning is a required branch-protection check once branch protection is
-  configured.
-
-Deployment is a separate `workflow_dispatch` workflow, constrained to the
-protected `main` ref and gated by GitHub Environments (`preview`, `production`).
-Production requires owner approval. Merging to `main` never deploys by itself.
+- `ci.yml` (pull_request + push main): install/lint/typecheck/test/build only.
+  `permissions: contents: read`, third-party actions pinned to full commit
+  SHAs, no `pull_request_target`, no self-hosted runners, no secrets.
+- `deploy.yml`: `workflow_dispatch` only, with explicit least-privilege
+  `permissions: { contents: read }` at the top level (deployment credentials
+  come from environment secrets, never from the GitHub token), gated by GitHub Environments
+  (`preview`, `production`; production requires owner approval). Runs D1
+  migrations then `wrangler deploy`. Merging to `main` never deploys.
+- No package publishing, marketplace, token-writing, or `id-token: write`
+  automation without an explicit release-readiness review.
 
 ## Rationale
 
-Build and test automation should support review without becoming a release,
-package-publish, marketplace-publish, or token-writing path before explicit
-release readiness.
+Implements the security contract's Repository Automation rules and the
+"CI is not release" invariant from the threat model.
