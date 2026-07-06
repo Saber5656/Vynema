@@ -45,6 +45,7 @@ Implement the signed finalize endpoint that verifies uploaded object existence, 
 ## Notes
 
 - Do not promise reliable duration or codec validation unless implemented without paid services.
+- The uploaded container is validated by a magic-byte / `ftyp` sniff at finalize (§1a); duration stays declared-only by explicit risk acceptance.
 
 ---
 Stable Issue Key: AIT-MVP-010
@@ -91,6 +92,35 @@ Sequence (normative):
 
 Note (ADR-009): `publication_enabled=false` does NOT gate finalize — finalize only queues for review and exposes nothing; queue growth is bounded by the upload caps, and the emergency-pause runbook flips `uploads_enabled` too when a full stop is needed.
 
+### 1a. Uploaded container validation (magic-byte / ftyp sniff)
+
+Client-declared `contentType` is not trustworthy: R2 stores whatever
+`Content-Type` the signed PUT carried, so a non-video payload (HTML, script,
+arbitrary binary) can be finalized as `video/mp4` and later served from the
+public media domain (stored-XSS / malware-distribution risk). Finalize MUST
+verify the actual bytes, in addition to the §1 step-4 size/hash checks:
+
+- Ranged read of the first 32 bytes of the video object
+  (`MEDIA_PENDING.get(video_object_key, { range: { offset: 0, length: 32 } })`).
+- Assert ISO-BMFF: bytes 4–7 == ASCII `ftyp`, and the major brand (bytes 8–11)
+  is in an allowlist (`isom`, `iso2`, `mp41`, `mp42`, `avc1`, `mp4v`, `M4V `).
+  Otherwise route to the §1 step-4 failure batch with reason
+  `container_invalid` and respond 422 `VALIDATION_FAILED`.
+- Thumbnail (when declared): assert JPEG (`FF D8 FF`) or PNG (`89 50 4E 47`)
+  magic; else failure reason `thumbnail_invalid`.
+
+This is O(32 bytes), needs no transcoding or paid service, and closes the
+"public bucket serves attacker-controlled content-type" hole. Add
+`container_invalid`/`thumbnail_invalid` to the §1 step-4 `finalize.failed`
+reason set.
+
+Duration remains DECLARED-ONLY (explicit risk acceptance): without decoding the
+container we cannot verify `durationSeconds`, so a lying agent can under-declare
+it. This is accepted for MVP because storage cost is bounded by the byte caps
+(QT-001/QT-003) and playback-UX degradation is low-severity. It is recorded as
+an accepted residual in the threat model non-blockers; do NOT promise verified
+duration in product copy or agent docs.
+
 ### 2. Cleanup cron (`apps/api/src/cron.ts`, wrangler `[triggers] crons = ["17 * * * *"]`)
 
 Export `scheduled` handler alongside the fetch handler in `index.ts`. Steps, each idempotent, each wrapped in try/catch so one failure doesn't stop the rest; finish with audit `cleanup.run` (system actor, metadata: per-step counts):
@@ -125,6 +155,7 @@ Finalize (fixtures: intent created via #8 route, object PUT via `MEDIA_PENDING` 
 | concurrent finalize (Promise.all ×2, distinct nonces) | exactly one 200, one 409; exactly one videos row |
 | expired intent | 410; reservation released (counters checked) |
 | object missing / size mismatch / wrong content-type | 422 with safe reason; intent `failed`; reservation released; objects deleted |
+| bytes are `<html>…` but PUT content-type `video/mp4` (spoofed container) | 422 `container_invalid` (§1a); intent `failed`; reservation released; object deleted |
 | human session, no signature | 401 `AGENT_AUTH_FAILED` |
 | finalized video not in public bucket & not in public APIs | assert no MEDIA_PUBLIC object; (API filter test lives in #15) |
 

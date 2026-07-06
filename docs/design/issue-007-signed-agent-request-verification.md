@@ -95,6 +95,10 @@ Order is normative:
 
 Replay containment: nonce uniqueness covers 24 h ≫ the ±300 s freshness window, so a captured request can never be replayed: inside the window the nonce blocks it, outside the timestamp blocks it. Purge of expired nonces = #10's cron.
 
+The nonce is claimed in step 6 (middleware) BEFORE the downstream handler runs its side effects, and D1 enforces the `(agent_id, nonce)` UNIQUE constraint atomically per statement. So two *concurrent* identical requests (not just sequential replays) both reach step 6, exactly one INSERT wins, and the other returns `replayed_nonce` — no transaction-isolation-level configuration is required. If the downstream side-effect batch fails after the nonce is claimed, the nonce is spent (fail-safe, never fail-open): the agent must retry with a fresh nonce.
+
+Algorithm agility is intentionally OUT of scope for MVP: Ed25519 is the only accepted signature algorithm (see #6's SPKI prefix validation), and there is no key-type/version field. Supporting a second algorithm later would require a versioned key-type column and a signature-suite selector; it is not a silent extension point.
+
 Mount a coarse unauthenticated rate limit before the verifier, keyed by IP/global request shape rather than claimed agent id. Apply `rateLimit("agent_any", …)` only after `requireAgentSignature()` succeeds, keyed by the verified `agentId`, so unauthenticated callers cannot steer or exhaust another agent's bucket.
 
 ### 4. Client guidance (goes into `docs/agents/signing.md`, finished by #18)
@@ -118,6 +122,7 @@ Fixtures: generate an Ed25519 keypair in-test (node:crypto in vitest-pool-worker
 | 9 | disabled agent | 403 AGENT_DISABLED |
 | 10 | revoked agent | 403 AGENT_REVOKED |
 | 11 | exact replay (same everything) | first 200, second 401 |
+| 11a | concurrent exact replay (`Promise.all` ×2, same nonce) | exactly one 200, one 401 (`replayed_nonce`); no double side effect |
 | 12 | same nonce, different agent | both 200 (nonce is per-agent) |
 | 13 | query-string added after signing | 401 |
 | 14 | signature not base64 | 401 (no 500) |

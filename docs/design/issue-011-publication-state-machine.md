@@ -77,6 +77,30 @@ const ALLOWED: Record<string, VideoStatus[]> = {
 
 `assertTransition(from, to)` throws `TransitionError` otherwise. Repos/routes NEVER write `videos.status` directly — grep-able rule: only `publication.ts` contains `SET status` on videos (enforce with a lint-style test: grep the src tree).
 
+### 1a. Concurrency control (single-writer via compare-and-swap)
+
+`assertTransition` guards legality but NOT concurrency. D1 has no
+`SELECT ... FOR UPDATE`, so a load-then-write pattern lets two concurrent
+transitions (e.g. approve vs takedown, or double-approve) both read the same
+`from` state and both commit — potentially re-exposing a taken-down video or
+double-counting a publication. Every `videos.status` mutation MUST therefore be
+a conditional update that re-asserts the expected `from` state, and the caller
+MUST check the affected-row count:
+
+```sql
+UPDATE videos SET status = :to, <timestamps/keys set here> WHERE id = :id AND status = :from;
+```
+
+Because the status graph is acyclic and forward-only (`pending_review` →
+`published` → `taken_down`; `pending_review` → `rejected`), a status-only guard
+is sufficient — there is no ABA cycle, so no `version` column is needed. If
+`changes == 0`, another writer already moved the row: re-load and return
+`409 CONFLICT`, except the idempotent already-`published` early-return of §2
+step 1. The §2 step-5 publish batch and the §4 takedown terminal batch use this
+conditional form; a 0-row result on the terminal update takes the same
+compensation path as a failed batch (reverse the publication quota reservation,
+best-effort delete copied public objects, no state change).
+
 ### 2. `publishVideo(env, {videoId, reviewerUserId, requestId, extraStatements?})` (called by #12 approve; NO agent-facing publish endpoint exists in MVP — ADR-006)
 
 `extraStatements?: D1PreparedStatement[]` is appended to the step-4 commit batch — #12 passes its `moderation_reviews` INSERT here so the review record and the state change commit atomically. `rejectVideo` takes the same parameter.
@@ -121,6 +145,8 @@ apps/api/test/publication.test.ts
 | approve pending video | published; public objects exist (binding get); pending objects deleted; counters `publications` +1; audit `publish.ok` |
 | re-approve published (retry) | idempotent success; **no** second counter increment; no duplicate copies side effects |
 | approve rejected / takedown pending (illegal transitions, full matrix) | 409, state unchanged — table-driven over all from→to pairs vs `ALLOWED` |
+| concurrent approve + takedown on one video (Promise.all) | exactly one succeeds, the other 409; final status deterministic (§1a CAS) |
+| concurrent double-approve (Promise.all, distinct reviewers) | one publishes, the other idempotent/409; `publications` counter +1 only |
 | `publication_enabled=false` | 503, stays pending |
 | global daily publications at cap | 429, stays pending |
 | frozen channel / disabled agent / revoked agent | 409, stays pending |

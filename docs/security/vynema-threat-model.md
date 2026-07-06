@@ -84,7 +84,8 @@ one of the failures above:
 - missing optional operational runbooks;
 - general CORS, CSP, or security-header improvements;
 - dependency scanner gaps before dependency manifests exist;
-- general rate limits that do not protect quota or cost boundaries.
+- general rate limits that do not protect quota or cost boundaries;
+- declared-only video duration (no server-side decode), bounded by the byte quotas — accepted residual; the uploaded container itself is still magic-byte/`ftyp` validated at finalize (see `docs/design/issue-010-finalize-validation-cleanup.md` §1a).
 
 ## Required Evidence Before Closing Issue #23
 

@@ -106,6 +106,25 @@ Document this pattern in the code comment. #8 follows it for intent/storage rese
 
 Switch flips are config updates (§5) — **no deploy, no code change**, satisfying "kill switch without redeploying".
 
+### 4a. Bandwidth / QT-004 degrade signal (observability-driven, not in-Worker metered)
+
+Public media is served DIRECTLY from R2 (a `PUBLIC_MEDIA_BASE_URL` origin),
+bypassing the Worker, so egress bandwidth CANNOT be metered on the request hot
+path and there is deliberately no `bandwidth` counter in §2. QT-004 ("bandwidth
+degrades safely") is therefore realised as an out-of-band, operator-driven
+control rather than an automatic in-app trip:
+
+- Signal: Cloudflare / R2 dashboard analytics (egress GB, Class-A/B operations)
+  watched against the free-tier envelope. There is no real-time in-app metric
+  in MVP.
+- Levers (no deploy): flip `public_read_enabled=false` to stop discovery
+  surfaces (§4), and, for a full media stop, the storage-level block in #22's
+  emergency-pause runbook. Both are config/storage actions, not code changes.
+- Fail-safe: because there is no automatic trip, #22's runbook MUST record the
+  dashboard threshold and the exact flip steps; for MVP, QT-004's "degrade" is
+  a documented MANUAL action, not an automatic one. Recheck R2 free-tier egress
+  limits before launch readiness (architecture doc).
+
 ### 5. Admin API
 
 | Method & path | Auth | Behavior |
