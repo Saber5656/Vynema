@@ -18,7 +18,7 @@ Create the automated test coverage required to launch the v2 MVP with confidence
 - Add integration tests for upload intent, direct upload mock, finalize, review, publish, takedown, and quota exhaustion.
 - Add UI or E2E tests for viewer pages, reviewer flows, agent docs/status, and no-human-upload boundary.
 - Add security regression tests for replay, revoked agent, unauthorized human, and public access leakage.
-- Document manual test checklist for object storage and production-like preview.
+- Document a manual local-development media/visibility smoke checklist; production-like environment checks are blocked on #42.
 
 ## Out Of Scope
 
@@ -40,7 +40,7 @@ Create the automated test coverage required to launch the v2 MVP with confidence
 
 ## Notes
 
-- Use mocks where provider free-tier limits make repeated real calls unsafe.
+- Development tests use real temporary SQLite/StorageAdapter state; provider tests wait for #42.
 - CI execution of this suite is validated by AIT-MVP-021.
 
 ---
@@ -54,12 +54,12 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Unit/integration tests are delivered INSIDE each feature issue (every design section above specifies its own test table). This issue delivers: (1) the E2E journey suite, (2) the launch-blocker traceability map, (3) the manual preview smoke checklist, (4) coverage reporting. Prerequisites: #4–#19, #34–#37 largely landed; #35 CLI for agent-flow E2E.
+> Normative. Unit/integration tests are delivered INSIDE each feature issue (every design section above specifies its own test table). This issue delivers: (1) the E2E journey suite, (2) the launch-blocker traceability map, (3) the manual local-development smoke checklist, (4) coverage reporting. Prerequisites: #4–#19, #34–#37 largely landed; #35 CLI for agent-flow E2E. Production-environment smoke evidence is blocked on #42.
 
 ### 1. E2E suite (`e2e/` workspace package, Playwright)
 
-- `e2e/package.json` (`@vynema/e2e`), `playwright.config.ts`: `webServer = { command: "pnpm --filter @vynema/web build && pnpm --filter @vynema/api exec wrangler dev --port 8787", url: "http://127.0.0.1:8787/api/health", timeout: 120000 }`; single `chromium` project; `workers: 1` for the MVP suite because scenarios mutate shared switches/quotas; `pnpm test:e2e` at root.
-- Seeding (`e2e/seed.ts`, runs in `globalSetup`): bootstrap admin user by direct SQL (`wrangler d1 execute --local`), everything else through the product's own paths — admin API creates agent + channel (#6), #35 CLI performs keygen/upload/finalize against the local dev-upload route (#9 §7.2), review API approves. Fixture video: tiny valid MP4 committed at `e2e/fixtures/tiny.mp4` (< 100 KB, generated once with ffmpeg, provenance note in adjacent README).
+- `e2e/package.json` (`@vynema/e2e`), `playwright.config.ts`: `webServer = { command: "pnpm --filter @vynema/web build && pnpm --filter @vynema/api dev --port 8787", url: "http://127.0.0.1:8787/api/health", timeout: 120000 }`; single `chromium` project; `workers: 1` because scenarios mutate shared switches/quotas; `pnpm test:e2e` at root.
+- Seeding (`e2e/seed.ts`, runs in `globalSetup`): create a temporary SQLite DB, bootstrap admin by the documented local command, then use product paths — admin API creates agent + channel (#6), #35 CLI performs keygen/upload/finalize through the one-time capability (#9), review API approves. Fixture video: tiny structurally valid MP4 committed at `e2e/fixtures/tiny.mp4` (<100 KB, provenance in adjacent README).
 - Auth in E2E: real GitHub OAuth is not scriptable — add a **local-only** login route `POST /api/dev/login {githubLogin, role}` mounted ONLY when `ENVIRONMENT === "local"` (same guard pattern as #9's dev-upload; include the test that it 404s when env≠local). E2E uses it to mint viewer/reviewer/admin sessions.
 
 Journeys (one spec file each):
@@ -68,7 +68,7 @@ These specs run serially in CI. Any future parallelization must add explicit sta
 
 | Spec | Steps & assertions |
 |---|---|
-| `viewer-browse.spec.ts` | home shows seeded published video card with AI badge → search finds it → channel page lists it → video page plays (`video` element has src under PUBLIC_MEDIA_BASE_URL, metadata loads) → provenance panel visible |
+| `viewer-browse.spec.ts` | home shows seeded published video card with AI badge → search finds it → channel page lists it → same-origin media route loads → provenance panel visible |
 | `agent-publish-flow.spec.ts` | CLI upload (intent→PUT→finalize) → video NOT on home → reviewer approves in `/admin/review` UI → video appears on home; CLI `status` shows `published` |
 | `moderation-takedown.spec.ts` | viewer reports published video → reviewer takes down in `/admin/reports` → video page shows unavailable; feed omits it; direct media URL request → 404 |
 | `no-human-upload.spec.ts` | signed-in admin browser context calls `POST /api/agent/upload-intents` via `page.request` (cookies attached, no signature) → 401 `AGENT_AUTH_FAILED`; UI contains no upload affordance on any route (reuse #16 §4 route list) |
@@ -85,16 +85,16 @@ Table: every row of `docs/security/launch-blocker-checklist.md` → the automate
 | Secret exposure | `secret-scan.yml` + #21 CI runs + manual history scan record |
 | Human upload capability | #5 `authz-boundary.test.ts` + #8 boundary case + `no-human-upload.spec.ts` |
 | Unauthenticated agent upload/publish | #7 test table (missing/invalid/revoked/stale/nonce/hash) + #8 unsigned case |
-| Pending/rejected media exposure | #15 visibility matrix + #11 public-bucket assertions + `moderation-takedown.spec.ts` + preview smoke §3 |
+| Pending/rejected media exposure | #15 visibility matrix + #11 visibility-checked media/BLOB-retention assertions + `moderation-takedown.spec.ts` + authorized preview smoke §3 |
 | Replayable signed request | #7 cases 11–12 |
 | Quota/cost bypass | #14 boundary tests + `quota-killswitch.spec.ts` |
 | Release/deploy gate bypass | #21 workflow review checklist |
 
 Keep this file updated by every PR that adds/renames boundary tests (add a line to the PR template? — no: note in the doc header instead).
 
-### 3. Manual preview smoke checklist (`docs/checklists/preview-smoke.md`)
+### 3. Manual local-development smoke checklist (`docs/checklists/development-smoke.md`)
 
-Real-provider checks that local tests cannot cover (run against the preview env once #21 provisions it; re-run before launch per #24): real presigned PUT to R2 succeeds with correct headers and fails with wrong length/hash; publish S3 CopyObject works; r2.dev URL serves published object; pending object URL patterns → 401/404 (per #9 §6); takedown → public object 404 within a minute; D1 migrations applied via CI path; kill switch flip via dashboard affects preview immediately. Each step: exact command/URL + expected result + a `[ ] date/initials` line.
+Real-provider checks are undefined until #42 selects production. #42 must add migration rehearsal plus upload scope, private-before-public, publish, takedown/cache purge, quota hard stop, database migration, rollback, and kill-switch checks with exact command/URL, expected result, date, and owner initials before release.
 
 ### 4. Coverage reporting
 
@@ -102,7 +102,7 @@ Enable `@vitest/coverage-v8` (`coverage.provider: "v8"`, reporter `text` + `json
 
 ### 5. Step-by-step order
 
-1. `e2e` package + webServer boot + `viewer-browse.spec.ts` (proves the harness). 2. dev-login route + guard test. 3. Remaining specs in table order. 4. Traceability map. 5. Preview smoke checklist. 6. Coverage wiring. 7. Hand off CI wiring to #21 (`test:e2e` must be runnable headless in CI: `npx playwright install --with-deps chromium`).
+1. `e2e` package + webServer boot + `viewer-browse.spec.ts` (proves the harness). 2. dev-login route + guard test. 3. Remaining specs in table order. 4. Traceability map. 5. Local-development smoke checklist. 6. Coverage wiring. 7. Hand off CI wiring to #21 (`test:e2e` must be runnable headless in CI: `npx playwright install --with-deps chromium`).
 
 ### 6. Acceptance mapping & PR evidence
 

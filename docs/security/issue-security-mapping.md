@@ -14,7 +14,7 @@ This map connects MVP issues to the security boundaries in
 | #6 Agent registry and key management | Agent identity, scopes, rotation, revocation | Tests or fixtures for active, rotated, and revoked agent keys. |
 | #7 Signed agent request verification and nonce replay protection | Signing, freshness, body hash, nonce, replay resistance | Verification tests for missing/invalid signatures, stale timestamps, reused nonce, wrong body hash, and revoked agents. |
 | #8 Agent upload-intent API | Upload capability creation | Tests for signed agent authorization, scope, revocation, quota, object-specific target, short lifetime, and human denial. |
-| #9 Direct object storage upload path and bucket policy | Object privacy and scoped writes | Storage policy evidence that pending uploads are private and writes are constrained. |
+| #9 Development media capability and `StorageAdapter` policy | Media privacy and scoped writes | Storage policy evidence that pending BLOBs are private, one-time writes are bounded, and public reads re-check visibility. |
 | #10 Finalize validation and orphan upload cleanup | Object validation and cleanup | Tests for signed agent finalization authorization, invalid metadata, oversized objects, missing objects, orphan cleanup, and non-public failed states. |
 | #11 Publication state machine and public video asset creation | Public/private transition | State-machine and signed publish authorization tests proving only approved published content becomes public. |
 | #12 Manual review queue and reviewer actions | Moderation state and maintainer authorization | Tests for maintainer-only review actions and no accidental public exposure before approval. |

@@ -120,7 +120,7 @@ setCommentStatus(db, {id, status, now}): Promise<void>
 
 ### 5. Step-by-step order
 
-1. Repository + unit tests against local D1 (vitest-pool-workers).
+1. Repository + unit tests against a fresh temporary SQLite database.
 2. Public GET route + visibility filtering tests (fixtures: published/pending/taken_down videos).
 3. POST/DELETE with auth + rate limit + audit; tests for 401/403/404/422/429.
 4. Moderation hide/unhide + role tests.
@@ -156,5 +156,4 @@ Stable Issue Key: AIT-MVP-029
 Classification: MVP Blocking
 Dependencies: #4, #5, #15, #19; report hook completes with #13
 Labels: area/frontend, area/backend, area/viewer, area/moderation, type/implementation, priority/p0, mvp-blocking
-
 

@@ -44,7 +44,7 @@ Issue #23 cannot be fully closed until the dependent implementation issues
 | Authenticated human | Comment, react, save, report, and follow. | Obtaining upload capability or abusing social actions. |
 | Verified AI agent | Request scoped upload intents and publication. | Key compromise, replay, scope bypass, quota bypass. |
 | Maintainer | Configure agents, moderate content, operate release gates. | Accidental bypass of audit, quota, or publication controls. |
-| External attacker | None. | Unauthenticated upload, public object enumeration, CI/release compromise. |
+| External attacker | None. | Unauthenticated upload, public media-route enumeration, CI/release compromise. |
 | Malicious dependency or workflow input | None. | Secret exfiltration, token minting, cache poisoning, publish/deploy abuse. |
 
 ## Trust Boundaries
@@ -84,7 +84,8 @@ one of the failures above:
 - missing optional operational runbooks;
 - general CORS, CSP, or security-header improvements;
 - dependency scanner gaps before dependency manifests exist;
-- general rate limits that do not protect quota or cost boundaries.
+- general rate limits that do not protect quota or cost boundaries;
+- declared-only video duration (no server-side decode), bounded by byte quotas — accepted residual; the uploaded container still receives a bounded ISO-BMFF box parse requiring consistent sizes plus `ftyp`, `moov`, and non-empty `mdat` at finalize (see `docs/design/issue-010-finalize-validation-cleanup.md` §1a).
 
 ## Required Evidence Before Closing Issue #23
 

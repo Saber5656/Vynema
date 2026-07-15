@@ -29,28 +29,28 @@ Issues within a wave can proceed in parallel; a wave needs its predecessors subs
 | 1 — Foundation | #34 (skeleton) | blocks everything below |
 | 2 — Platform | #4 (schema), #19 (API platform) | #21 CI scaffolding (ci.yml) can start here too |
 | 3 — Identity & limits | #5 (human auth), #6 (agent registry), #14 (quota/kill switch) | |
-| 4 — Agent auth & storage | #7 (signing), #9 (R2 + presigner) | #35 (CLI signing/vectors half) in parallel with #7 |
-| 5 — Upload pipeline | #8 (upload intent), #10 (finalize + cron cleanup) | |
+| 4 — Agent auth & storage | #7 (signing), #9 (SQLite BLOB `StorageAdapter` + one-time capability) | #35 (CLI signing/vectors half) in parallel with #7 |
+| 5 — Upload pipeline | #8 (upload intent), #10 (finalize + callable cleanup) | Production scheduling stays blocked on #42. |
 | 6 — Publication & reads | #11 (state machine), #12 (review queue), #15 (public APIs) | |
 | 7 — Product surfaces | #16 (viewer UI), #13 (abuse/takedown), #35 (CLI upload flow half) | |
 | 8 — Interactions & ops UI | #17 (reactions), #37 (comments), #18 (agent docs + admin dashboard) | |
-| 9 — Quality & ops | #20 (E2E + boundary map), #21 (deploy workflow + preview env), #22 (audit/runbooks), #29 (IaC import) | |
+| 9 — Quality & ops | #20 (E2E + boundary map), #21 (checks-only CI), #22 (local audit/runbooks), #29 (provider-independent IaC posture) | Production environment work stays blocked on #42. |
 | 10 — Launch | #36 (policy docs — can start any time after Wave 0), #23 (security review closure), #24 (readiness + go/no-go) | |
 
 ## Checklist (close when merged with evidence)
 
 - [ ] #2 ADRs approved & committed
 - [ ] #34 Application skeleton
-- [ ] #4 D1 schema & migrations
+- [ ] #4 local SQLite schema & migrations
 - [ ] #19 API platform (errors / request IDs / rate limits / CORS)
 - [ ] #5 Human auth & no-human-upload boundary
 - [ ] #6 Agent registry & keys
 - [ ] #14 Quota ledger & kill switches
 - [ ] #7 Signed agent requests & replay protection
-- [ ] #9 Object storage path & bucket policy
+- [ ] #9 Development `StorageAdapter`, SQLite BLOBs & capability policy
 - [ ] #35 Reference agent CLI & test vectors
 - [ ] #8 Upload-intent API
-- [ ] #10 Finalize & cleanup cron
+- [ ] #10 Finalize & callable development cleanup
 - [ ] #11 Publication state machine
 - [ ] #12 Review queue & actions
 - [ ] #15 Public feed/search/channel/detail APIs
@@ -60,9 +60,9 @@ Issues within a wave can proceed in parallel; a wave needs its predecessors subs
 - [ ] #37 Comments system
 - [ ] #18 Agent docs & admin dashboard
 - [ ] #20 Test matrix (E2E + boundary map)
-- [ ] #21 CI/CD & deployment
+- [ ] #21 Checks-only CI (deployment remains blocked on #42)
 - [ ] #22 Observability / audit / runbooks
-- [ ] #29 Terraform IaC posture
+- [ ] #29 Provider-independent IaC posture (provisioning blocked on #42)
 - [ ] #36 Policy docs
 - [ ] #23 Security review closed (owner sign-off)
 - [ ] #24 Launch readiness & go/no-go
@@ -80,7 +80,7 @@ Issues within a wave can proceed in parallel; a wave needs its predecessors subs
 | Public visibility predicate | #15 §1 | #12, #13, #17, #37, #16 |
 | Storage accounting (reservation model) | #10 (canonical) = #14 (amended) | #8, #11 |
 | Video status transitions (single writer) | #11 §1 | #12, #13 |
-| Object key layout & bucket posture | #9 | #8, #10, #11, #13 |
+| Development media BLOB/capability contract | #9 | #8, #10, #11, #13 |
 | Audit action registry | #22 §1 | all |
 | Report/moderation enums | #36 = #4 DDL | #13, #37 |
 
@@ -89,7 +89,7 @@ Post-MVP (not in the waves): #31 automated review layer.
 
 ## Update 2026-07-03: ADR baseline in repo + requirements renumbering
 
-1. **ADRs are now repo files**: the owner resolved the three conflicts between merged PR #33 (Pages / Clerk-first / signed playback URLs) and the issue designs in favor of the issue designs (single Worker / GitHub OAuth / public-bucket copy-on-publish). The accepted baseline is committed at `docs/architecture/adr/` (PR #39). Issue #2's design section and all "#2 ADR-xxx" references across issues map 1:1 to those files.
+1. **Historical note, superseded 2026-07-15:** PR #39 recorded an earlier single-Worker / GitHub OAuth / public-bucket baseline. The current development authority is the amended ADR set: local same-origin runtime, local SQLite metadata/media BLOBs, and transactional visibility. Production hosting/runtime/storage/deployment is undecided and launch-blocked by #42.
 2. **Requirements were renumbered** by PR #32 (`docs/requirements/vynema-mvp-requirements.md`, 2026-06-28). Issue design sections written 2026-07-02 cite the OLD FR ids in a few places. Mapping for implementers:
 
 | Old id (in issue designs) | New id (current requirements doc) |
@@ -101,4 +101,3 @@ Post-MVP (not in the waves): #31 automated review layer.
 | NFR-006 (degrade safely) | QT-004 |
 
 When an issue design cites an old id, treat the new ids above as the authoritative requirement text. The design content itself is unaffected.
-

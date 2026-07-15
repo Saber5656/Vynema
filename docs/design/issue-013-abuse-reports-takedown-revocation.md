@@ -78,9 +78,9 @@ Rules: target must currently be publicly visible (video: #15 predicate; comment:
 |---|---|---|
 | `GET /api/moderation/reports?status=open&category&targetType&cursor&limit` | — | list with per-target open-report counts + target summary (video title / comment excerpt ≤100 chars) |
 | `POST /api/moderation/reports/:id/claim` | — | `open → under_review` (idempotent if already claimed by anyone); audit `report.claimed` |
-| `POST /api/moderation/reports/:id/resolve` | `{outcome: "actioned"|"no_action", note: string (required)}` | `open|under_review → resolved_actioned|resolved_no_action`, sets resolver + `resolved_at`; audit `report.resolved`. Resolved is terminal → 409 on re-resolve. |
-| `POST /api/moderation/videos/:id/takedown` | `{reason: required}` | calls #11 `takedownVideo` (public objects removed + quarantined, status `taken_down`, audited). Only for `published` → else 409. |
-| `POST /api/admin/channels/:id/freeze` / `unfreeze` | `{reason: required}` | **admin only.** Sets `channels.status`. Freeze ⇒ (a) #8 rejects new intents (`CHANNEL_FROZEN`), (b) the #15 public predicate hides ALL the channel's videos immediately. Unfreeze restores both. Audit `channel.frozen|unfrozen`. |
+| `POST /api/moderation/reports/:id/resolve` | `{outcome: "actioned"\|"no_action", note: string (required)}` | `open\|under_review → resolved_actioned\|resolved_no_action`, sets resolver + `resolved_at`; audit `report.resolved`. Resolved is terminal → 409 on re-resolve. |
+| `POST /api/moderation/videos/:id/takedown` | `{reason: required}` | calls #11 `takedownVideo` (transactional visibility change to `taken_down`; immutable evidence BLOB retained; audited). Only for `published` → else 409. |
+| `POST /api/admin/channels/:id/freeze` / `unfreeze` | `{reason: required}` | **admin only.** Sets `channels.status`. Freeze ⇒ (a) #8 rejects new intents (`CHANNEL_FROZEN`), (b) the #15 public predicate hides ALL the channel's videos immediately. Unfreeze restores both. Audit `channel.frozen\|unfrozen`. |
 | agent revocation | — | reuse `POST /api/admin/agents/:id/revoke` (#6). Effects (already designed there): all keys revoked, no new signed requests succeed (#7 403 `AGENT_REVOKED`), and the #15 predicate (`agent.status != 'revoked'`) hides all their videos. This issue adds the end-to-end tests. |
 
 Resolution does not auto-trigger actions; the reviewer performs takedown/hide/freeze explicitly, then resolves with `actioned`. (Keeps each mutation single-purpose and auditable.)
@@ -94,9 +94,9 @@ Resolution does not auto-trigger actions; the reviewer performs takedown/hide/fr
 
 | Case | Expect |
 |---|---|
-| report visible video | 201 + audit; report non-visible video | 404 |
+| report visible / non-visible video | visible → 201 + audit; non-visible → 404 |
 | report comment; its video later taken down; moderation list | report still listed with context (moderation sees non-public state) |
-| takedown published video | #15 detail/feed/search/channel → gone (404/absent); public object 404 (binding check); quarantine object exists; audit `takedown.ok` |
+| takedown published video | #15 detail/feed/search/channel → gone (404/absent); public media route 404; same immutable evidence BLOB remains through authorized storage inspection; audit `takedown.ok` |
 | takedown pending video | 409 (pre-publication rejection is #12's reject) |
 | freeze channel with 2 published videos | both vanish from ALL public reads; new intent → 403 `CHANNEL_FROZEN`; unfreeze → both visible again |
 | revoke agent with published videos | videos vanish from public reads; agent's signed request → 403 `AGENT_REVOKED`; intent creation impossible; **cannot un-revoke** (#6 409) |
@@ -122,4 +122,3 @@ Order: 1. report create + tests. 2. moderation list/claim/resolve + tests. 3. ta
 
 - "Signed-in viewers can report videos and comments" → §1/§3; "reports create auditable records with category/context" → §1 audit; "reviewers resolve and perform takedowns" → §2; "takedown hides public content without deleting audit history" → §4 takedown row (quarantine + audit retained); "revoked agents and frozen channels cannot publish new content" → §4 freeze/revoke rows; "tests cover report/takedown/revocation/authorization" → §4 table.
 - PR evidence: §4 output, security impact note ("moderation can stop exposure — propagation verified incl. object-level 404"), screenshot of report dialog + reports queue.
-

@@ -67,17 +67,22 @@ Exactly the ADR-009 table (repo file [`docs/architecture/adr/ADR-009-quota-defau
 type QuotaDecision = { allowed: true } | { allowed: false; code: "QUOTA_EXCEEDED" | "UPLOADS_DISABLED" | "PUBLICATION_DISABLED"; metric?: string };
 
 checkIntentAllowed(db, cfg, args: {agentId, declaredVideoBytes, declaredThumbnailBytes}): Promise<QuotaDecision>
-buildIntentCreatedStatements(args): D1PreparedStatement[]   // intents +1 AND storage_bytes += declared (reservation) + ledger; caller batches with the intent INSERT
-verifyCountersAfterIncrement(db, cfg, agentId): Promise<QuotaDecision>  // post-write overshoot check (see §3)
-buildReleaseStatements(args: {agentId, declaredBytes, refId, reason}): D1PreparedStatement[]  // storage gauges -= declared (reservation release / rejected purge)
+reserveIntentWithinCaps(tx, cfg, args): Promise<QuotaDecision> // conditional agent/global intent + storage guards; ledger in same tx
+releaseReservation(tx, args: {agentId, declaredBytes, refId, reason}): Promise<boolean> // conditional storage decrement + same-period ledger; exactly-once ref guard
 checkPublishAllowed(db, cfg, agentId): Promise<QuotaDecision>   // per-agent AND global daily publication caps
-buildPublishedStatements(args): D1PreparedStatement[]       // publications daily +1 (agent + global), ledger
-verifyPublicationCountersAfterIncrement(db, cfg, agentId): Promise<QuotaDecision>  // post-write overshoot check for #11
-buildPublicationCompensationStatements(args): D1PreparedStatement[]  // reverse a reserved publication slot when #11 copy/commit fails
+reservePublicationWithinCaps(tx, cfg, args): Promise<QuotaDecision> // publication guards + ledger in #11 tx
 getQuotaStatus(db, cfg): Promise<QuotaStatusDto>            // all counters vs caps, for admin
 ```
 
-Counter semantics (`quota_counters`): daily metrics (`intents`, `publications`) use `period_start` = UTC midnight (ms); gauges (`storage_bytes`) use `period_start = 0`. Upsert pattern: `INSERT … ON CONFLICT(scope,scope_id,metric,period_start) DO UPDATE SET value = value + ?, updated_at = ?`. Every counter change writes a matching `quota_ledger` row in the same batch (ledger = audit trail, counters = enforcement).
+Counter semantics (`quota_counters`): daily metrics (`intents`, `publications`)
+use `period_start` = UTC midnight (ms); gauges (`storage_bytes`) use
+`period_start = 0`. Each increment is a conditional INSERT/UPDATE whose
+predicate proves `value + delta <= cap`; the caller must check exactly one
+affected row. Every counter change writes a matching `quota_ledger` row in the
+same SQLite transaction (ledger = audit trail, counters = enforcement).
+Release updates require `value >= delta` and an unused lifecycle reference;
+zero affected rows aborts the transaction. This prevents negative counters and
+double-decrement on retry.
 
 `checkIntentAllowed` evaluates in order (first failure wins):
 1. `uploads_enabled` false → `UPLOADS_DISABLED`.
@@ -86,15 +91,24 @@ Counter semantics (`quota_counters`): daily metrics (`intents`, `publications`) 
 4. agent storage gauge + declared bytes > `per_agent_active_storage_bytes`.
 5. global storage gauge + declared bytes > `global_active_storage_bytes`.
 
-### 3. Concurrency: check → batch-increment → verify → compensate
+### 3. Concurrency: conditional cap guards in one transaction
 
-D1 has no SELECT-FOR-UPDATE. Two concurrent intents could both pass §2 checks. Normative pattern for #8:
+Two concurrent intents may both pass the optional load-time hint, so it is not
+the enforcement boundary. The normative development pattern for #8 is one
+SQLite transaction that:
 
-1. `checkIntentAllowed` (fast deny).
-2. One `db.batch([...intentInsert, ...buildIntentCreatedStatements()])` — atomic.
-3. `verifyCountersAfterIncrement`: re-read the two daily counters and two gauges; if any now EXCEEDS its cap, run the compensation batch (`mark intent failed` + `buildCleanupStatements` reversing the increments) and return `QUOTA_EXCEEDED`. Net effect: caps may be probed but never durably exceeded; failure mode is over-denial (fail closed), never over-grant.
+1. conditionally increments the agent/global daily-intent counters and the
+   agent/global storage gauges only when each resulting value is `<= cap`;
+2. checks every affected-row count;
+3. inserts the matching ledger entries, intent, capability hashes/expected
+   metadata, and success audit;
+4. rolls everything back if any guard returns zero or any later statement fails.
 
-Document this pattern in the code comment. #8 follows it for intent/storage reservations. #11 follows the same pattern for publication counters by reserving the publication slot before public copy, verifying, and compensating on cap overshoot or later publish failure.
+There is no commit-then-verify window and no compensation API. At cap−1, a
+barrier race yields exactly one successful reservation. Injecting failure after
+each statement leaves no intent, capability, counter, ledger, or audit residue.
+#11 uses the same pattern for publication counters inside its status-CAS
+transaction.
 
 ### 4. Kill switches & degraded modes (wired in the owning issues, defined here)
 
@@ -102,9 +116,33 @@ Document this pattern in the code comment. #8 follows it for intent/storage rese
 |---|---|---|
 | `uploads_enabled` | intent creation → 503 `UPLOADS_DISABLED`; finalize of EXISTING intents still allowed (they hold storage already) | #8 |
 | `publication_enabled` | review approval returns 503 `PUBLICATION_DISABLED`; queue/reject still work | #11/#12 |
-| `public_read_enabled` | public read APIs → 503 `SERVICE_DEGRADED`; UI shows a static "temporarily read-limited" notice; admin+agent endpoints unaffected. NOTE: stops discovery surfaces only — already-public media URLs keep serving from R2; the full media stop is the storage-level action in #22's emergency-pause runbook (no deploy) | #15/#16 |
+| `public_read_enabled` | public discovery APIs and the development media route → 503 `SERVICE_DEGRADED`; UI shows a static "temporarily read-limited" notice; admin+agent endpoints unaffected | #15/#16 |
 
 Switch flips are config updates (§5) — **no deploy, no code change**, satisfying "kill switch without redeploying".
+
+### 4a. Provider read/spend boundary and QT-004
+
+Development stores media as SQLite BLOBs behind `StorageAdapter`. The application
+serves development media through its own authenticated/visibility-checked route,
+so `public_read_enabled=false` gates both discovery and media bytes. Development
+tests can therefore count requests synchronously and prove the switch fails
+closed without any cloud account or provider credential.
+
+This does **not** claim that QT-004 is mitigated for release. A production media
+provider, delivery path, pricing model, measurable operation/byte boundary, and
+provider-side hard stop have not been selected. Launch-blocking issue #42 owns
+that decision and the migration rehearsal. Before release it MUST:
+
+- select current provider/pricing limits from official sources;
+- define a measurable pre-limit threshold and an automatic or provider-enforced
+  stop that does not rely only on an operator noticing a dashboard;
+- prove cached/direct URLs cannot bypass the stop and takedown boundary;
+- update #22 with exact provider commands, verification, rollback, and owner
+  sign-off.
+
+Until #42 is resolved, QT-004 remains **open / not mitigated for production**.
+Manual provider dashboard observation is not accepted as fail-closed evidence
+and no Cloudflare/R2-specific risk is accepted by this design.
 
 ### 5. Admin API
 
@@ -122,15 +160,28 @@ Switch flips are config updates (§5) — **no deploy, no code change**, satisfy
 | intent created (#8) | agent+global `intents` +1 (daily); agent+global `storage_bytes` += declared bytes (**reservation**); ledger `intent_created` + `reserved` |
 | finalize ok (#10) | no counter change (object size verified equal to declaration; reservation already covers it) |
 | finalize failure / intent expired (#10) | `storage_bytes` -= declared (release); ledger `reservation_released` |
-| rejected video purged after 7 d (#10 cron) | `storage_bytes` -= declared; ledger `rejected_purged` |
-| published (#11) | agent+global `publications` +1; ledger `published` (storage net 0: public copy + pending delete) |
-| takedown (#13) | storage net 0 (quarantine move); ledger `taken_down` |
+| rejected video purged after 7 d (#10 cleanup job) | `storage_bytes` -= declared; ledger `rejected_purged` |
+| published (#11) | agent+global `publications` +1; ledger `published` (storage net 0: visibility change over the same BLOB) |
+| takedown (#13) | storage net 0 (visibility change; evidence BLOB retained); ledger `taken_down` |
 
-Reconciliation test: after a scripted lifecycle (2 intents → 1 finalized → published → taken down; 1 expired+cleaned), `SUM(quota_ledger.delta)` per (scope,metric) == `quota_counters.value`.
+Reconciliation test: after a scripted lifecycle (2 intents → 1 finalized →
+published → taken down; 1 expired+cleaned), `SUM(quota_ledger.delta)` per
+`(scope, scope_id, metric, period_start)` equals the matching
+`quota_counters.value`. UTC-day rollover creates a new daily period; storage
+gauges use period `0`.
 
 ### 7. Tests (`apps/api/test/quota.test.ts`)
 
-Table-driven boundaries: each §2 check at cap−1 (allow) and at cap (deny, correct `metric`); switches off → correct 503 codes; `ConfigUnavailableError` → deny; §3 compensation (simulate by pre-incrementing counters between check and verify); §5 config update happy/unknown-key/bad-type + audit row; §6 reconciliation.
+Table-driven boundaries: each §2 check at cap−1 (allow) and at cap (deny,
+correct `metric`); barrier race at cap−1 gives one commit and never exposes a
+committed counter over cap; fault injection after every §3 statement rolls back
+all state; UTC-day rollover reconciles separately; double release and
+insufficient-gauge release affect zero rows and roll back; switches off →
+correct 503 codes; `public_read_enabled=false` denies
+both development discovery and media routes; `ConfigUnavailableError` → deny;
+§5 config update happy/unknown-key/bad-type + audit row; §6 reconciliation.
+Production provider-spend tests are blocked on #42 and must not be marked
+passing in this issue.
 
 ### 8. File layout & order
 
@@ -141,10 +192,9 @@ packages/shared/src/schemas/admin-config.ts
 apps/api/test/quota.test.ts
 ```
 
-1. Counter/ledger helpers + reconciliation test. 2. `checkIntentAllowed` + boundary tests. 3. §3 verify/compensate + race test. 4. Switches + publish check. 5. Admin endpoints + audit. 6. Update `docs/architecture/vynema-architecture.md` Free-Tier Control Points table to reference the config keys.
+1. Counter/ledger helpers + reconciliation test. 2. `checkIntentAllowed` + boundary tests. 3. §3 conditional transaction + race/fault-injection tests. 4. Switches + publish check. 5. Admin endpoints + audit. 6. Update `docs/architecture/vynema-architecture.md` Free-Tier Control Points table to reference the config keys.
 
 ### 9. Acceptance mapping & PR evidence
 
 - "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → `SERVICE_DEGRADED` wiring (#15 completes; state split in PR); "admins see quota state" → §5.
 - PR evidence: boundary test table output + reconciliation test output + security impact note ("quota/cost boundary — fail-closed verified").
-

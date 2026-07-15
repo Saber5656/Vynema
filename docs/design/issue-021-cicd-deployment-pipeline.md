@@ -1,4 +1,4 @@
-# Issue #21: Implement CI/CD and Cloudflare deployment pipeline
+# Issue #21: Implement checks-only CI; defer deployment pipeline to #42
 
 GitHub issue: https://github.com/Saber5656/Vynema/issues/21
 
@@ -10,17 +10,15 @@ file.
 
 ## Summary
 
-Implement the build, test, migration, preview, and production deployment workflow for the selected v2 stack.
+Implement checks-only CI now; leave preview/production deployment, migrations, and rollback blocked until #42 selects the production stack.
 
 ## Scope
 
 - Add CI jobs for install, lint, typecheck, tests, and build.
 - Wire the test commands produced by AIT-MVP-020 into CI when available; CI scaffolding must not wait for AIT-MVP-020 to close.
-- Add deployment configuration for the selected Cloudflare Worker + Static Assets stack.
-- Add D1 migration deployment process.
-- Add R2 bucket binding and environment variable management.
-- Define preview and production deployment gates.
-- Document rollback and emergency disable steps.
+- Add provider-independent build/test CI.
+- Keep deployment, production migrations, media bindings, and provider secrets blocked until #42.
+- Reserve requirements for a future main-only, owner-approved deployment gate after #42.
 
 ## Out Of Scope
 
@@ -31,10 +29,10 @@ Implement the build, test, migration, preview, and production deployment workflo
 
 - [ ] CI blocks merge on failing lint/type/build steps and any available test steps.
 - [ ] After AIT-MVP-020 lands, the automated test suite runs in CI and failing tests block merge.
-- [ ] Preview deployments can run with preview database/storage bindings.
-- [ ] Production deployment instructions are documented and repeatable.
+- [ ] No deploy workflow, cloud binding, or provider secret exists before #42.
+- [ ] Deployment/migration/rollback acceptance remains explicitly blocked on #42.
 - [ ] Secrets and bindings are not committed to the repository.
-- [ ] Migration order and rollback/recovery steps are documented.
+- [ ] Local SQLite migration order, backup restore, and fix-forward recovery are documented; production migration/rollback acceptance remains owned by #42.
 - [ ] Infra review confirms no automatic paid spend is introduced.
 
 ## Dependencies
@@ -45,7 +43,7 @@ Implement the build, test, migration, preview, and production deployment workflo
 
 ## Notes
 
-- Deployment must be compatible with the free-tier guardrails.
+- Future deployment must use the provider/pricing guardrails approved in #42.
 
 ---
 Stable Issue Key: AIT-MVP-021
@@ -56,9 +54,9 @@ Source Task: TSK-1260
 
 ---
 
-## Implementation Plan & Design (added 2026-07-02)
+## Implementation Plan & Design (amended 2026-07-15)
 
-> Normative. Implements ADR-010. MUST comply with `docs/security/security-contract.md` §Repository Automation — that section is the review checklist for this issue's PRs. Prerequisites: #34 (scripts exist), #2 approved. CI scaffolding lands immediately; deploy workflow lands with the first preview environment.
+> Normative. Implements ADR-010. MUST comply with the repository automation security contract. Checks-only CI may land now. No deploy workflow, cloud environment, provider token, production migration, or release command may be added before #42 selects the stack and receives owner approval.
 
 ### 1. Workflows
 
@@ -70,51 +68,39 @@ Source Task: TSK-1260
 - Job `e2e` (added when #20 lands): same setup + `npx playwright install --with-deps chromium` + `pnpm test:e2e`; artifacts: playwright report on failure.
 - **Action pinning rule (normative)**: every third-party action pinned to a full 40-char commit SHA with a trailing version comment. Resolve SHAs at implementation time: `gh api repos/<owner>/<repo>/git/ref/tags/<vX.Y.Z> --jq .object.sha` (dereference annotated tags via `git/tags/<sha>` if type=tag). Actions used: `actions/checkout`, `pnpm/action-setup`, `actions/setup-node`, `actions/upload-artifact`. Dependabot (already configured) keeps them updated.
 
-#### `.github/workflows/deploy.yml`
+#### Deployment workflow
 
-- Trigger: `workflow_dispatch` with `inputs.environment: choice [preview, production]`. **No push/PR/schedule trigger. Merging to `main` never deploys** (explicit release gate). The deploy job must also guard `github.ref == 'refs/heads/main'` (or explicitly check out the protected main SHA) so manually dispatched non-main refs cannot deploy.
-- `permissions: { contents: read }`. Job `deploy` with `if: github.ref == 'refs/heads/main'` and `environment: ${{ inputs.environment }}` — the GitHub Environment supplies secrets and, for `production`, a required-reviewer approval gate (owner). Setting up the environments (names `preview`, `production`; production: required reviewer = owner; both: secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`) is an owner console step — document exact clicks in `docs/deployment.md`.
-- Steps: checkout (pinned) → pnpm/node setup → install → `pnpm build` → `pnpm --filter @vynema/api exec wrangler d1 migrations apply vynema-db --env ${{ inputs.environment }} --remote` → `pnpm --filter @vynema/api exec wrangler deploy --env ${{ inputs.environment }}`.
-- Cloudflare API token scope (least privilege): Account → Workers Scripts:Edit, D1:Edit, Workers R2 Storage: none (buckets pre-provisioned per #9/#29). No account-wide admin token. Document creation steps.
-- No `id-token: write`, no package publishing, no marketplace, no token-writing steps anywhere. Adding any of those requires the release-readiness review per the security contract.
+**Intentionally absent.** #42 must define the selected provider, current pricing,
+database/media migration, preview/production separation, least-privilege secrets,
+main-ref guard, owner approval, rollback, and boundary tests before a manual
+deploy workflow can be proposed. No `id-token: write`, package publishing,
+marketplace, token-writing, or provider write credential is allowed meanwhile.
 
 #### Existing `secret-scan.yml`
 
 Keep; verify it also runs on `pull_request` and pin its actions to SHAs while touching CI (same PR). Include its `high-confidence-secret-scan` check in required branch-protection checks alongside `checks` and `e2e` once branch protection is configured.
 
-### 2. `wrangler.toml` environments (extends #34's file)
+### 2. Environment posture
 
-```toml
-# default env = local dev only; database_id stays a placeholder so a bare
-# `wrangler deploy` (no --env) fails validation — accidental-deploy failsafe.
-
-[env.preview]
-name = "vynema-preview"
-vars = { ENVIRONMENT = "preview", PUBLIC_MEDIA_BASE_URL = "https://<preview-r2-dev-url>" }
-d1_databases = [{ binding = "DB", database_name = "vynema-db-preview", database_id = "<set-after-create>" }]
-r2_buckets = [
-  { binding = "MEDIA_PENDING", bucket_name = "vynema-media-pending-preview" },
-  { binding = "MEDIA_PUBLIC",  bucket_name = "vynema-media-public-preview" },
-]
-
-[env.production]
-name = "vynema"
-# same shape with production names/ids
-```
-
-Provisioning commands (run once by owner, recorded in `docs/deployment.md`; #29 defines the longer-term IaC posture): `wrangler d1 create vynema-db-preview` / `vynema-db`, bucket creation per #9 §5, `wrangler secret put <NAME> --env <env>` for the #34 `env.ts` secret list. Secret VALUES never appear in repo, CI logs, or issue comments.
+Only local development exists. There is no preview/production config, cloud
+resource id, provider domain, or deployment secret. #42 creates these only after
+migration and security-boundary rehearsal.
 
 ### 3. `docs/deployment.md` (new)
 
-Sections: environment model table (#2 ADR); one-time provisioning; how to deploy (Actions → deploy.yml → choose env → production waits for owner approval and deploy job rejects non-main refs); verifying a deploy (`/api/health` shows environment, smoke per #20 §3); **rollback**: `wrangler deployments list` → `wrangler rollback [--message]` (workers versions), D1 = forward-only (fix-forward or Time Travel restore per #4 — WARNING: restores lose writes since timestamp; runbook #22 covers decision); **emergency disable**: kill switches first (#14 — no deploy needed), full stop = `wrangler versions deploy` of a maintenance version or Cloudflare dashboard disable; branch protection: after first CI run, add required status checks `checks`, `high-confidence-secret-scan` (+`e2e` later) — `gh api -X PUT repos/Saber5656/Vynema/branches/main/protection/required_status_checks` or console; owner performs.
+For now, document local CI commands and state that deployment is blocked on #42.
+After #42, extend this document with provisioning, main-only manual deploy,
+owner approval, migration/rollback, emergency disable, and smoke evidence.
+Branch protection may require `checks`, `high-confidence-secret-scan`, and later
+`e2e`; it must not require a nonexistent deploy check.
 
 ### 4. Tests / verification
 
 - CI proves itself: open a scratch PR with a failing test → CI red; fix → green. Record run links in this issue.
-- Deploy workflow first run targets `preview`; verify health endpoint + preview smoke (#20 §3); production deploy deferred to #24 go/no-go.
+- Verify no deploy workflow or provider secret exists. Provider deployment tests are `N/A — blocked on #42`.
 - Workflow-lint step: add `zizmor` or manual checklist? MVP: manual checklist in PR description = the security-contract §Repository Automation bullets, each checked with a line of evidence (grep output: `grep -rn "pull_request_target\|self-hosted\|id-token" .github/workflows/` → empty).
 
 ### 5. Acceptance mapping & PR evidence
 
-- "CI blocks merge on failing steps" → §1 ci.yml + branch protection note; "test suite runs in CI once #20 lands" → e2e job clause; "preview deployments with preview bindings" → §2; "production instructions documented/repeatable" → §3; "secrets not committed" → secret flow (§2) + scan workflow; "migration order and rollback documented" → §3; "no automatic paid spend" → free-tier stack (ADR-001/002/003) + no paid add-ons in workflows (state in PR).
+- "CI blocks merge on failing steps" → §1 ci.yml + branch protection note; "test suite runs in CI once #20 lands" → e2e job clause; deployment/provider requirements remain unchecked and explicitly delegated to #42; "no automatic paid spend" → no deploy workflow or provider secret.
 - PR evidence: security impact note ("repository automation — least-privilege reviewed"), the grep outputs above, CI run links (red→green demo), pinned-SHA table (action → SHA → version).

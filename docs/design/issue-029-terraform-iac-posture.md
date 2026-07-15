@@ -22,7 +22,7 @@ This issue exists now as a planning placeholder because the product implementati
 - Define secret handling boundaries: secrets must not be stored in Terraform state unless explicitly accepted.
 - Define resource naming conventions, tags/metadata, and cost/free-tier guardrails.
 - Define drift detection and change review workflow.
-- Align with the deployment pipeline issue for the selected Cloudflare Worker + Static Assets stack, D1, R2, DNS, and environment bindings.
+- Align with #42 and #21 only after a production provider and migration plan are approved.
 
 ## Out Of Scope
 
@@ -44,7 +44,7 @@ This issue exists now as a planning placeholder because the product implementati
 ## Dependencies
 
 - AIT-MVP-002: Finalize v2 architecture and provider quota choices.
-- AIT-MVP-021: Implement CI/CD and Cloudflare deployment pipeline.
+- AIT-MVP-021: Implement checks-only CI and the later approved deployment gate.
 - AIT-MVP-023: Security hardening and threat model review.
 
 ## Notes
@@ -60,53 +60,24 @@ Source: Side conversation request for Terraform/IaC cloud resource management.
 
 ---
 
-## Implementation Plan & Design (added 2026-07-02)
+## Implementation Plan & Design (amended 2026-07-15)
 
-> Normative for IaC posture. Prerequisites: #2 ADRs approved (stack: Workers/D1/R2). This issue stays design+skeleton until #21 provisions the first real environment; apply happens only after that, via import.
+> No IaC provider, module, state backend, cloud resource, or provider credential
+> may be selected or scaffolded before launch-blocking issue #42 completes its
+> provider/pricing and migration decision. Historical Cloudflare-specific plans
+> are superseded.
 
-### 1. Ownership split (the core policy)
+### Required output after #42
 
-| Resource | Managed by | Rationale |
-|---|---|---|
-| R2 buckets (+ lifecycle rules, public-access/custom-domain config) | **Terraform** | Long-lived, security-posture-bearing (#9); drift here breaks the private/public boundary |
-| D1 databases (existence only, NOT schema) | **Terraform** | Schema/migrations stay with wrangler (#4/#21) |
-| Custom domains / DNS (when added) | **Terraform** | |
-| Worker script + versions + secrets + bindings | **wrangler** (deploy.yml, #21) | Deploys are release-gated; TF must not become a hidden deploy path (issue note requirement) |
-| GitHub repo settings | **manual/gh** (existing hardening PRs) | Out of IaC scope for MVP |
+- Explicit ownership table for every selected production resource.
+- State backend/access/locking and secret-state analysis.
+- Preview/production isolation, naming, drift, import, rollback, and incident
+  reconciliation policy.
+- Private-before-public, takedown, quota hard-stop, and no-hidden-deploy guards.
+- Manual owner-reviewed apply; no CI apply or token-writing automation without a
+  separate security review.
 
-### 2. Layout & state backend
+### Current acceptance state
 
-```
-infra/
-  modules/vynema-env/        # buckets ×2, lifecycle, d1 database, outputs (ids for wrangler.toml)
-    main.tf variables.tf outputs.tf
-  envs/preview/main.tf       # module instance, backend config
-  envs/production/main.tf
-  README.md                  # this policy + how to plan/apply/import
-```
-
-- Backend: S3-compatible on a dedicated R2 bucket `vynema-tfstate` (created manually, once), `use_lockfile = true` (TF ≥ 1.10 native lockfile; R2 conditional writes support it), one state key per env (`preview.tfstate`, `production.tfstate`). Backend credentials: R2 S3 token scoped to `vynema-tfstate` only, held by owner, exported as env vars — **never committed**.
-- Provider: `cloudflare/cloudflare` pinned (`~> 5.0` + `.terraform.lock.hcl` committed). Provider token via `CLOUDFLARE_API_TOKEN` env var, scoped: R2:Edit + D1:Edit only.
-
-### 3. Secrets policy (normative)
-
-No secret values in `.tf`, `.tfvars`, or state: TF creates resources whose configuration is non-secret; Worker secrets flow exclusively through `wrangler secret put` (#21). The known exception class (provider tokens) lives in the operator's environment. If a future resource unavoidably places a secret in state, it requires explicit owner risk acceptance recorded on this issue (per `security-contract.md` acceptance rules).
-
-### 4. Change & drift workflow
-
-- All `.tf` changes via PR (normal review; security-sensitive when touching bucket public access, lifecycle, or domains).
-- Apply: manual, owner-run, from the PR's merged commit: `terraform plan -out` → read plan → `apply` the saved plan. **No CI plan/apply in MVP** — mirrors the deploy release gate; revisit only with the same environment-approval gating as deploy.yml.
-- Drift detection: owner runs `terraform plan` per env before any infra change and monthly (calendar note in `infra/README.md`); non-empty unexpected plan = investigate, then either import/align or revert console change. Manual console changes to TF-owned resources are forbidden except during incidents (then: run plan + reconcile within a week, note on this issue).
-- Bootstrap/import order (because #21 creates resources with wrangler first): write module → `terraform import` existing buckets/D1 → `plan` until empty → from then on TF is authoritative for §1 rows.
-
-### 5. Naming & guardrails
-
-Names exactly as in #2's environment table (`vynema-media-pending[-preview]`, etc.). Module hardcodes `public_access = false` on the pending bucket — a plan flipping it must never apply (add a `lifecycle { precondition }` or validation guarding it). Free-tier guardrail: module contains NO paid-tier resources (no Workers paid plan toggles, no R2 storage-class extras); adding any paid resource requires the #14/#24 spend review.
-
-### 6. Step-by-step order
-
-1. `infra/README.md` with §1–§5 (policy first — this closes most acceptance boxes). 2. Module + env instances compiling against placeholder account id (`terraform validate` in CI later; keep out of ci.yml for MVP to avoid token needs — validate locally). 3. After #21 provisions preview: import, empty-plan proof (paste into this issue). 4. Production import at launch window (#24). 5. File follow-up issue for CI `terraform plan` (comment-only) if wanted post-MVP.
-
-### 7. Acceptance mapping
-
-Ownership policy → §1; resource list → §2 module (per approved providers); state backend/access → §2; secrets → §3; env separation → §2 env dirs; drift/manual-change policy → §4; follow-up tasks → §6.5.
+`blocked on #42` is the only valid result. The repository must contain no `.tf`
+provider/resource scaffold that could imply an approved cloud or pricing model.

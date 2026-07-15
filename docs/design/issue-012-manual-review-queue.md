@@ -55,7 +55,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4, #5 (`requireRole`), #9 (presigner), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), #14 (switch behavior). Coordinate: this issue passes its `moderation_reviews` INSERT into #11's commit batch via the `extraStatements` parameter (see #11 §2 note).
+> Normative. Prerequisites: #4, #5 (`requireRole`), #9 (`StorageAdapter`), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), #14 (switch behavior). Coordinate: this issue passes its `moderation_reviews` INSERT into #11's transaction via the `extraStatements` parameter.
 
 ### 1. API (GET routes `requireRole("reviewer" | "admin")`; approve/reject `requireRole("reviewer")`; all origin-check)
 
@@ -63,7 +63,7 @@ Source Task: TSK-1260
 |---|---|---|---|
 | `GET /api/moderation/queue?cursor&limit` | — | 200 `{items: QueueItemDto[], nextCursor}` | videos `status='pending_review'`, oldest first (`created_at ASC, id ASC` — FIFO fairness), uses `idx_videos_review_queue` |
 | `GET /api/moderation/videos/:id` | — | 200 QueueItemDetailDto | any status (reviewers may inspect history) |
-| `GET /api/moderation/videos/:id/preview-url` | — | 200 `{url, expiresAt}` | ONLY for `pending_review` videos → else 409 `CONFLICT`. Presigned **GET** on the pending object, TTL 600 s. Audit `moderation.preview_issued` (actor, videoId). This is the single sanctioned private-media read path. |
+| `GET /api/moderation/videos/:id/preview` | — | 200 media stream | ONLY for `pending_review` videos → else 409 `CONFLICT`. Reviewer/admin-only same-origin response resolved through `StorageAdapter`; never returns a BLOB id or transferable URL. Audit `moderation.preview_issued` (actor, videoId). |
 | `POST /api/moderation/videos/:id/approve` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]` |
 | `POST /api/moderation/videos/:id/reject` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `rejectVideo` with the review INSERT |
 
@@ -76,13 +76,13 @@ write or review insert.
 
 Error surface (from downstream, pass through): 503 `PUBLICATION_DISABLED` (kill switch — queue still readable, reject still works), 429 `QUOTA_EXCEEDED` (publish cap), 409 `CONFLICT` (already decided / frozen channel / agent not active).
 
-Preview-URL addition to #9's presigner: `presignPendingGet(env, {key, expiresSeconds = 600})` — same AwsClient, method GET, `signQuery: true`. No other endpoint may mint pending GET URLs.
+Pending preview uses a reviewer/admin-only same-origin route that resolves the video through authorization and reads via `StorageAdapter`; it never returns a blob id or transferable storage URL. Audit `moderation.preview_issued` on success. No anonymous endpoint can read pending media.
 
 ### 2. Reviewer UI (`apps/web/src/routes/admin/ReviewQueuePage.tsx` + `ReviewDetailPage.tsx`, route `/admin/review`)
 
 - Route guard: render only when `useMe()` role ∈ {reviewer, admin}; otherwise redirect `/` (server still enforces — the guard is UX only; add a comment saying exactly that).
 - Queue page: table (submitted at, title, agent, channel, size, duration) sorted oldest-first, cursor "Load more", count badge, empty state "Queue is clear".
-- Detail page: metadata + provenance panel (render all values as plain text), a declared-vs-observed duration line (the player exposes the actual duration; reviewers MUST reject on material mismatch with the declared value — this is the MVP's actual-duration enforcement point per ADR-009 Notes), `<video controls src={previewUrl}>` fetched on demand via the preview-url endpoint (re-fetch on expiry error), Approve button (confirm dialog with REQUIRED reason textarea trimmed on submit) and Reject button (dialog with REQUIRED reason textarea trimmed on submit). Empty-after-trim reasons are blocked before submit when possible and still rejected by the API. On success: toast + navigate back + invalidate queue query. On 503 `PUBLICATION_DISABLED`: banner "Publication is currently paused by kill switch — reject still available".
+- Detail page: metadata + provenance panel (render all values as plain text), a declared-vs-observed duration line (the player exposes the actual duration; reviewers MUST reject on material mismatch with the declared value — this is the MVP's actual-duration enforcement point per ADR-009 Notes), `<video controls src="/api/moderation/videos/:id/preview">` fetched on demand with the reviewer session, Approve button (confirm dialog with REQUIRED reason textarea trimmed on submit) and Reject button (dialog with REQUIRED reason textarea trimmed on submit). Empty-after-trim reasons are blocked before submit when possible and still rejected by the API. On success: toast + navigate back + invalidate queue query. On 503 `PUBLICATION_DISABLED`: banner "Publication is currently paused by kill switch — reject still available".
 - No bulk actions in MVP.
 
 ### 3. Tests (`apps/api/test/moderation-review.test.ts` + component tests)
@@ -90,14 +90,14 @@ Preview-URL addition to #9's presigner: `presignPendingGet(env, {key, expiresSec
 | Case | Expect |
 |---|---|
 | viewer requests queue / approve | 403 both |
-| reviewer approves pending video | 200; video published (public object exists); `moderation_reviews` row `approved` **in same transaction** (assert row exists even if a later step would fail — simulate by checking batch atomicity); audit `publish.ok` |
+| reviewer approves pending video | 200; video published and visibility-checked media route reads the same immutable BLOB; `moderation_reviews` row `approved` **in the same transaction**; injected rollback leaves neither review nor publish effect; audit `publish.ok` |
 | reject without reason | 422 |
 | approve/reject with whitespace-only reason | 422 `VALIDATION_FAILED` before `publishVideo`/`rejectVideo`; no status change; no `moderation_reviews` row |
 | reject with reason | rejected; review row persisted; NOT in public APIs (#15 fixture reused) |
 | approve already-rejected | 409 |
-| double approve (retry) | idempotent 200; exactly ONE review row per decision call is fine — assert no duplicate publish counters |
-| preview-url for pending | 200; audit `moderation.preview_issued`; URL host is R2, `X-Amz-Expires=600` |
-| preview-url for published video | 409 |
+| double approve (retry) | idempotent 200; the retry returns before `extraStatements`, so exactly one approved review row and one publish counter/audit effect exist |
+| preview pending media | reviewer/admin-only same-origin preview route returns 200 + audit; no session → 401, viewer session → 403; the separate public media route for the pending video → 404 |
+| preview route for published video | 409 |
 | `publication_enabled=false` | approve → 503; reject → still 200 |
 | queue ordering | 3 fixtures submitted in order → returned FIFO |
 
@@ -105,7 +105,7 @@ UI component tests: role guard redirect; reject requires reason; kill-switch ban
 
 ### 4. Step-by-step order
 
-1. Queue/detail endpoints + DTO + tests. 2. `presignPendingGet` (+ structure test) and preview endpoint + audit. 3. Approve/reject wiring through #11 with `extraStatements` + tests. 4. UI pages + component tests. 5. Update `docs/security/issue-security-mapping.md` row #12 with evidence pointers.
+1. Queue/detail endpoints + DTO + tests. 2. Authorized same-origin preview endpoint + audit. 3. Approve/reject wiring through #11 with `extraStatements` + tests. 4. UI pages + component tests. 5. Update `docs/security/issue-security-mapping.md` row #12 with evidence pointers.
 
 ### 5. Acceptance mapping & PR evidence
 
