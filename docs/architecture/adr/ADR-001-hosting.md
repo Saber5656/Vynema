@@ -1,32 +1,25 @@
-# ADR-001: Single Cloudflare Worker For API And Static Assets
+# ADR-001: Same-Origin Local Development Runtime; Production Hosting Deferred
 
-Status: accepted (owner decision 2026-07-03)
-Supersedes: `docs/architecture/provider-decisions.md` ADR-001 (Cloudflare Pages); absorbs its ADR-002 (Workers for APIs)
-Issue: #2
+Status: amended (owner decision 2026-07-15)
+Supersedes: the 2026-07-03 Cloudflare Worker development baseline
+Issue: #2 (production decision: #42)
 
 ## Decision
 
-One Cloudflare Worker named `vynema` serves both the Hono API under `/api/*` and
-the built SPA via Workers Static Assets:
-
-- `run_worker_first = ["/api/*"]`
-- `not_found_handling = "single-page-application"`
-
-Cloudflare Pages is NOT used. Pages + separate Worker remains a documented
-alternative, not the MVP standard.
+Development runs locally with one same-origin process: Hono serves `/api/*`,
+development media routes, and the built Vite SPA fallback. Runtime code stays on
+Web-standard request/response APIs and isolates database/storage behind adapters.
+No production hosting provider, plan, or deploy command is selected before #42.
 
 ## Rationale
 
-- Same-origin app and API removes CORS and cross-origin cookie complexity
-  entirely for the human web app (sessions stay `SameSite=Lax`, no `SameSite=None`).
-- One deploy unit and one `wrangler.toml` instead of two release surfaces.
-- Workers Static Assets is Cloudflare's current recommendation for new projects;
-  static asset requests are free and unlimited, same as Pages.
-- Workers Free: 100,000 requests/day, 10 ms CPU per invocation. Static asset
-  serving does not consume the request quota.
+- Same-origin app/API/media removes CORS and cross-origin cookie complexity in
+  development.
+- Local startup requires no cloud account, credentials, or paid resource.
+- Web-standard interfaces plus adapters preserve a testable migration seam.
 
 ## Constraints
 
-- Workers must not proxy video bytes (see ADR-003).
-- Security-sensitive routes fail closed if the daily request limit is exceeded.
-- Production deployment remains behind the explicit release gate (ADR-010).
+- Development serves SQLite BLOB media through visibility-checked routes (ADR-003).
+- Security-sensitive routes fail closed when local quota/config state is unavailable.
+- Production hosting and deployment remain blocked on #42 and ADR-010.

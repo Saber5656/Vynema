@@ -153,9 +153,9 @@ issue changes scope.
 
 | Consumer | What This Issue Provides | What It Must Not Assume |
 |---|---|---|
-| #2 Architecture/provider choices | Product and security requirements, quota/failure-mode boundaries, no-human-upload boundary | Concrete provider selection, D1 vs Supabase decision, final auth provider |
+| #2 Architecture/development choices | Product/security boundaries and local adapter seams | Production cloud/database/media/pricing/migration are deferred to launch-blocking #42 |
 | #3 Workflow/doc cleanup | Current implementation contract and historical-v1 separation rule | Permission to delete historical context silently |
-| #4 Metadata schema | Required entities and state boundaries for agents, uploads, videos, review, quotas, interactions, and audit | Final schema shape before #2 provider choices |
+| #4 Development schema | Required entities/state boundaries plus SQLite media BLOBs | Production schema/media migration after #42 provider decision |
 | #31 Automated review layer | Post-MVP scale-readiness target for automated approval/quarantine/escalation | Permission to auto-publish during MVP or bypass manual review before owner approval |
 | #5-#19 Implementation issues | Testable product/security requirements and launch-blocking boundaries | Permission to relax Phase 0 security baseline |
 

@@ -1,12 +1,12 @@
 # ADR-007: TypeScript Strict, Hono, Vite + React SPA, pnpm 10 Workspaces
 
-Status: accepted (owner decision 2026-07-03)
+Status: amended (owner decision 2026-07-15; production runtime deferred to #42)
 Issue: #2 (implementation: #34)
 
 ## Decision
 
 - TypeScript `strict` everywhere.
-- API: Hono ^4 on Cloudflare Workers.
+- API: Hono ^4 using Web-standard APIs; development runtime is local and production runtime is selected in #42.
 - Frontend: Vite + React SPA + react-router-dom + TanStack Query; plain CSS
   Modules (no Tailwind/UI kit).
 - Shared request/response types and zod schemas in `packages/shared`.
@@ -17,6 +17,6 @@ Issue: #2 (implementation: #34)
 
 ## Rationale
 
-Smallest well-trodden stack for Workers with typed contracts shared end to end.
-The dependency set is deliberately minimal (Hono, zod, aws4fetch, React
+Small, portable stack with typed contracts shared end to end. The dependency
+set is deliberately minimal (Hono, zod, SQLite driver, React
 toolchain) to bound supply-chain exposure.

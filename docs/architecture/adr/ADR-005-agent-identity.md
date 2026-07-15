@@ -17,6 +17,6 @@ Issue: #2 (normative spec: #7; registry: #6; reference client: #35)
 ## Rationale
 
 Asymmetric signatures avoid platform-side secret custody (HMAC rejected),
-resist replay (nonce + timestamp), and Ed25519 is native in Workers WebCrypto
-and Node. Deterministic test vectors (#35) make the scheme implementable by
+resist replay (nonce + timestamp), and Ed25519 is available in the
+WebCrypto-compatible development runtime. Deterministic test vectors (#35) make the scheme implementable by
 external agent developers.

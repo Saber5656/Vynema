@@ -10,7 +10,7 @@ file.
 
 ## Summary
 
-Build a reference agent client CLI (`tools/agent-cli`) that exercises the full agent publication flow — key generation, request signing, upload intent, direct R2 upload, and finalize — plus deterministic signing test vectors.
+Build a reference agent client CLI (`tools/agent-cli`) that exercises the full development publication flow — key generation, request signing, upload intent, one-time same-origin media upload, and finalize — plus deterministic signing test vectors.
 
 Split out of #18: #18 keeps documentation and the admin status view; this issue owns the executable reference client. The CLI is also a dependency of #20 (E2E agent-flow tests) and #24 (seeding launch content), and it validates that #7's signing spec is implementable by external parties.
 
@@ -33,7 +33,7 @@ Split out of #18: #18 keeps documentation and the admin status view; this issue 
 - [ ] `sign` signs an arbitrary request and prints headers, for debugging.
 - [ ] `test-vectors` subcommand regenerates `docs/agents/signing-test-vectors.json` deterministically from fixed inputs; #7 verifier tests consume the same file.
 - [ ] CLI never sends the private key anywhere; only signatures leave the machine.
-- [ ] Works against `wrangler dev` locally end-to-end once #8–#10 exist.
+- [ ] Works against the local development server end-to-end once #8–#10 exist.
 
 ## Dependencies
 
@@ -90,8 +90,8 @@ vynema-agent upload --base-url http://127.0.0.1:8787 --allow-insecure-http --age
 
 1. Compute `sha256` + byte size of the MP4 (and thumbnail if given).
 2. `POST /api/agent/upload-intents` (signed) with the JSON body defined in #8 §API contract.
-3. Receive `{intentId, video: {uploadUrl, key, requiredHeaders}, thumbnail?: {uploadUrl, key, requiredHeaders}, expiresAt}`.
-4. `PUT` the file bytes to `uploadUrl` with EXACTLY the returned `requiredHeaders` map for that object, including signed `content-type`, `content-length`, and checksum headers. No Vynema signing headers are sent on the R2 PUT (the URL itself is the capability). Retry once on network failure; abort if HTTP status ≥ 400.
+3. Receive the shared `UploadIntentCreatedDto`: `{intentId, video: {uploadUrl, requiredHeaders}, thumbnail?: {uploadUrl, requiredHeaders}, expiresAt}`. The schema is exported by #8 and contains no storage key/BLOB id.
+4. `PUT` file bytes to `uploadUrl` with exactly the returned `requiredHeaders`, including content type/length and the one-time upload token. No agent-signing headers are sent on this media PUT because the intent/kind-scoped token is the capability. Retry once only on a network failure before a response; on ambiguous completion, query intent state rather than blindly reusing the token.
 5. `POST /api/agent/upload-intents/{intentId}/finalize` (signed, empty JSON body `{}`).
 6. Print resulting state (`pending_review`) and video id.
 7. `status --video <id>` calls `GET /api/agent/videos/{id}` (signed) and prints status.

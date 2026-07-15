@@ -1,18 +1,18 @@
 # ADR-009: Quota Defaults And Kill Switches Live In `platform_config`
 
-Status: accepted (owner decision 2026-07-03)
+Status: amended (owner decision 2026-07-15; development defaults only)
 Issue: #2 (implementation: #14; accounting model: #10)
 
 ## Decision
 
-All limits are rows in the D1 `platform_config` table, changeable by admins at
+All development limits are rows in the SQLite `platform_config` table, changeable by admins at
 runtime without deployment. Checks fail closed (missing config => deny).
 
 | Key | Default | Enforced at |
 |---|---|---|
 | `uploads_enabled` | `true` | intent creation |
 | `publication_enabled` | `true` | review approval -> publish |
-| `public_read_enabled` | `true` | public read APIs (503 degrade). Stops discovery surfaces only — already-public media URLs keep serving from R2; full media stop is the emergency-pause runbook's storage-level action (disable the public bucket's public access — no deploy) |
+| `public_read_enabled` | `true` | development public APIs and media routes (503 degrade). Production hard-stop behavior is blocked on #42 |
 | `max_video_bytes` | 104857600 (100 MiB) | intent + finalize |
 | `max_thumbnail_bytes` | 2097152 (2 MiB) | intent + finalize |
 | `max_declared_duration_seconds` | 600 | intent |
@@ -43,6 +43,7 @@ issue #10).
 
 ## Rationale
 
-Every value sits below the provider free-tier limits recorded in
-`provider-decisions.md`; kill switches satisfy QT-006 (stop upload/publication
-without deployment).
+Development values are bounded application defaults, not claims about any
+provider free tier. Issue #42 must select and enforce production limits from
+current official pricing before release. Kill switches satisfy the local QT-006
+behavior; production provider hard-stop evidence remains part of #42.

@@ -1,28 +1,31 @@
-# ADR-002: Cloudflare D1 With Plain SQL Migrations, No ORM
+# ADR-002: Local SQLite With Plain SQL Migrations, No ORM
 
-Status: accepted (owner decision 2026-07-03)
-Refines: `docs/architecture/provider-decisions.md` ADR-003 (D1 first, Supabase fallback)
-Issue: #2 (schema implementation: #4)
+Status: amended (owner decision 2026-07-15)
+Supersedes: the 2026-07-03 D1-first provider decision
+Issue: #2 (schema implementation: #4; production decision: #42)
 
 ## Decision
 
-- D1 databases `vynema-db` (production) and `vynema-db-preview` (preview).
-- Migrations are plain SQL files in `apps/api/migrations/`, applied with
-  `wrangler d1 migrations apply`. Forward-only; recovery via D1 Time Travel.
+- Development uses a repository-owned local SQLite database. It stores both
+  application metadata and development media BLOBs through `StorageAdapter`.
+- Migrations are plain SQL files in `apps/api/migrations/` and run locally.
 - Data access goes through hand-written typed repository modules using prepared
   statements. No ORM.
+- No production database provider is selected. Launch-blocking issue #42 owns
+  provider/pricing selection and the rehearsed export/import migration.
 
 ## Rationale
 
-- D1 Free (5 GB, 5M reads/day, 100k writes/day) covers pre-alpha scale; local
-  development works with zero setup via miniflare.
+- Local SQLite keeps development offline, reproducible, and free of cloud
+  accounts, provider credentials, or pricing assumptions.
 - Plain SQL keeps the schema reviewable in PRs and avoids ORM version churn;
   repository functions are individually testable.
-- The repository layer is the migration seam if the Supabase fallback in
-  provider-decisions.md ADR-003 is ever triggered (SQL dialect changes stay
-  inside `apps/api/src/lib/repo/`).
+- The repository and storage adapter layers are the migration seams; SQL dialect
+  and media transfer changes remain isolated when #42 selects production.
 
 ## Constraints
 
-- Full-text search uses SQLite FTS5 inside D1 (see issue #15).
-- Application quotas must keep usage below D1 free limits (ADR-009).
+- Full-text search uses SQLite FTS5 in development (see issue #15).
+- SQLite BLOB storage is development-only; it is not evidence that a production
+  database should serve media.
+- Release cannot provision or migrate production data until #42 is approved.

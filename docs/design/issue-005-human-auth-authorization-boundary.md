@@ -54,7 +54,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4 (users/sessions tables), #19 (errors, origin-check, rate limiter). Implements ADR-004 (GitHub OAuth + D1 sessions, no Clerk).
+> Normative. Prerequisites: #4 (users/sessions tables), #19 (errors, origin-check, rate limiter). Implements ADR-004 (GitHub OAuth + local SQLite sessions, no Clerk).
 
 ### 1. Endpoints
 
@@ -120,7 +120,7 @@ apps/web/src/features/auth/SignInButton.tsx / UserMenu.tsx
 
 ### 6. Admin bootstrap (no auto-admin)
 
-The FIRST admin is promoted manually: `wrangler d1 execute vynema-db --command "UPDATE users SET role='admin' WHERE github_login='<owner>'"` after first login. Document in `docs/development.md` and the ops runbook (#22). Automatic first-user-becomes-admin is forbidden (public deployment footgun).
+The FIRST admin is promoted manually with the documented local SQLite admin command after first login. Document the exact database path/backup and `UPDATE users SET role='admin' WHERE github_login='<owner>'` procedure in `docs/development.md` and #22. Automatic first-user-becomes-admin is forbidden.
 
 ### 7. Audit events
 

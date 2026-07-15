@@ -1,48 +1,40 @@
-# ADR-003: Two R2 Buckets With Direct Upload And Copy-On-Publish
+# ADR-003: SQLite BLOB Development Storage Behind StorageAdapter
 
-Status: accepted (owner decision 2026-07-03)
-Refines: `docs/architecture/provider-decisions.md` ADR-004 (R2 Standard) and
-resolves its open playback-access question in favor of public-bucket playback
-Issue: #2 (implementation: #8, #9, #10, #11)
+Status: amended (owner decision 2026-07-15)
+Supersedes: the 2026-07-03 two-R2-bucket development baseline
+Issue: #2 (implementation: #8, #9, #10, #11; production decision: #42)
 
 ## Decision
 
-- `vynema-media-pending` (private, never public): all agent uploads land here
-  via S3-compatible presigned PUT URLs (15-minute TTL, single object key, signed
-  `content-length` / `content-type` / `x-amz-checksum-sha256` headers).
-- `vynema-media-public` (public read; r2.dev pre-alpha, custom domain before
-  launch): objects exist here ONLY after publication approval. Publication
-  performs a server-side S3 CopyObject pending -> public, then deletes the
-  pending object. Takedown copies public -> quarantine and deletes the public
-  object, so revocation is a storage-level access change, as required by
-  provider-decisions.md ADR-004.
-- Playback uses direct public-bucket URLs. Short-lived signed playback URLs are
-  NOT used: every playback would consume the Workers 100k requests/day free
-  quota and defeat CDN caching. The public bucket contains approved content
-  only, so URL exposure exposes nothing non-public.
-- App servers and Workers never proxy video bytes for upload or playback.
+- Development stores video and thumbnail bytes as immutable SQLite BLOBs in
+  `media_blobs`. Only `StorageAdapter` accesses BLOB rows.
+- Agent upload uses 15-minute, intent/kind-scoped, one-time capabilities. The DB
+  stores only token hashes and commits a BLOB only after exact size/MIME/SHA-256
+  verification.
+- Publication does not duplicate media. `videos.status` and the canonical
+  visibility predicate control whether the same immutable BLOB is readable.
+- Development media routes re-check visibility and `public_read_enabled` for
+  every request. Takedown hides immediately while retaining evidence.
+- Production database, object/media storage, delivery, caching, provider, and
+  pricing are deliberately undecided until launch-blocking issue #42.
 
 ## Rationale
 
-The hard private/public bucket split makes "pending media is never public"
-structurally true rather than ACL-dependent: the public bucket cannot contain
-unreviewed content. R2 Standard free tier: 10 GB storage, 1M class-A ops/month,
-10M class-B ops/month, zero egress fees.
+One local persistence boundary makes development reproducible without secrets or
+cloud resources. Application-level visibility remains structurally testable,
+while `StorageAdapter` prevents the local BLOB representation from becoming the
+production contract.
 
-## Cache control and takedown propagation
+## Takedown and future delivery
 
-- Publish copies set `cache-control: public, max-age=3600` on public objects so
-  CDN caching is bounded.
-- When a Cloudflare custom domain fronts the public bucket (launch posture),
-  takedown/revocation MUST also purge the affected URLs via the Cloudflare
-  purge-by-URL API (zone-scoped token held as a Worker secret): Cloudflare's
-  default cache behavior includes MP4 and can serve cached bytes after object
-  deletion. On pre-alpha r2.dev, purge may be skipped with a logged warning.
+- Development responses use `Cache-Control: no-store`; the next request observes
+  the committed takedown state.
+- #42 must prove the selected production cache/delivery path cannot continue
+  serving taken-down content and must document exact purge/disable evidence.
 
 ## Constraints
 
-- Global active storage cap 8 GiB (below the 10 GB free tier), enforced before
-  intent creation (ADR-009).
-- Object keys are UUID-based and unguessable; bucket listing is never exposed.
-- Pending-bucket lifecycle rule (7-day expiry on `pending/`) backs up the
-  hourly cleanup cron (#10).
+- Development storage caps are application configuration, enforced before intent
+  creation (ADR-009), not claims about a provider free tier.
+- BLOB ids, token hashes, and intent ids never appear in public DTOs or logs.
+- Rejected/orphan BLOB cleanup is DB-aware and idempotent (#10).

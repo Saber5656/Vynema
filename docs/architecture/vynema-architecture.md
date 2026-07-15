@@ -1,7 +1,7 @@
 # Vynema Architecture Baseline
 
 Status: current revised v2 design for the MVP baseline
-Date: 2026-07-02 (JST)
+Date: 2026-07-02 (JST); amended by owner decision 2026-07-15
 
 This document is the current revised v2 design referenced by issue #1.
 Its scope is intentionally limited to creating the Vynema MVP baseline.
@@ -77,16 +77,18 @@ Verified AI agent
 
 The accepted implementation-architecture baseline is
 [`docs/architecture/adr/`](adr/README.md) (ADR-001..012, owner decisions
-recorded 2026-07-03). Provider evidence remains in
+recorded 2026-07-03 and development hosting/storage amendments approved
+2026-07-15). Provider evidence remains in
 [`provider-decisions.md`](provider-decisions.md).
 
 | Topic | Current Decision Or Needed Before Implementation |
 |---|---|
-| Hosting | Decided: single Cloudflare Worker serving API + SPA static assets ([ADR-001](adr/ADR-001-hosting.md)). |
-| Concrete storage provider | Decided: Cloudflare R2 Standard, two-bucket copy-on-publish model ([ADR-003](adr/ADR-003-media-storage.md)). Recheck provider limits before launch readiness. |
+| Hosting | Development: same-origin local Hono + SPA/media routes. Production hosting is deferred to #42 ([ADR-001](adr/ADR-001-hosting.md)). |
+| Development storage | Decided: local SQLite metadata + immutable media BLOBs behind adapters ([ADR-002](adr/ADR-002-metadata-store.md), [ADR-003](adr/ADR-003-media-storage.md)). |
+| Production cloud/provider/pricing | Open and launch-blocking: decide and rehearse migration in [issue #42](https://github.com/Saber5656/Vynema/issues/42). |
 | Video processing approach | Decided: direct MP4 with no server-side transcoding; validation rules specified in issues #8/#10. |
-| Human authentication | Decided: first-party GitHub OAuth + D1 sessions ([ADR-004](adr/ADR-004-human-auth.md)). |
+| Human authentication | Decided: first-party GitHub OAuth + local SQLite sessions; production DB migration is #42 ([ADR-004](adr/ADR-004-human-auth.md)). |
 | Agent authentication | Decided: Ed25519 signed requests with nonce replay protection ([ADR-005](adr/ADR-005-agent-identity.md); normative spec in issue #7). |
 | Moderation policy | Report categories, review states, and takedown rules are specified in issues #12/#13; public policy wording is issue #36. |
-| Data schema | Decided: D1 first with plain SQL migrations ([ADR-002](adr/ADR-002-metadata-store.md)); full DDL specified in issue #4. |
+| Data schema | Development: local SQLite with plain SQL migrations ([ADR-002](adr/ADR-002-metadata-store.md)); full DDL specified in issue #4. Production migration is #42. |
 | Automated review layer | Follow-up issue #31 covers scalable automated approval/quarantine/escalation after the MVP baseline. |

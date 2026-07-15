@@ -10,14 +10,13 @@ file.
 
 ## Summary
 
-Finalize the technical architecture for the free-tier-bounded MVP, including hosting, API runtime, metadata database, object storage, human auth, and operational quota assumptions.
+Define the provider-independent development architecture and defer production cloud, database/media provider, pricing, and migration decisions to the release-readiness gate in #42.
 
 ## Scope
 
-- Decide the MVP provider stack: a single Cloudflare Worker, Workers Static Assets, D1, R2, and first-party GitHub OAuth sessions.
-- Document fallback criteria for Supabase if D1 is not selected.
-- Define no-paid-spend constraints and provider configuration needed to avoid automatic paid usage.
-- Define environment boundaries for local, preview, and production.
+- Define local SQLite metadata/media BLOB storage behind repository and `StorageAdapter` seams.
+- Keep development free of cloud provider credentials and paid resources.
+- Define the boundary between local development and #42 production migration.
 - Document architectural tradeoffs for no transcoding, direct MP4 playback, manual review, and serverless APIs.
 
 ## Out Of Scope
@@ -28,12 +27,11 @@ Finalize the technical architecture for the free-tier-bounded MVP, including hos
 
 ## Acceptance Criteria
 
-- [ ] Architecture decision record exists for each provider choice.
-- [ ] Free-tier quotas and relevant hard limits are documented with recheck date.
-- [ ] No paid dependency is required for launch.
-- [ ] The architecture states that app servers never proxy video bytes.
-- [ ] D1 versus Supabase decision is recorded with migration impact.
-- [ ] Infra review confirms the plan is deployable without automatic spend.
+- [ ] Development ADRs specify local SQLite metadata and media BLOBs behind adapters.
+- [ ] No cloud account, provider credential, or paid dependency is required for development.
+- [ ] #42 is the explicit launch blocker for provider/pricing selection and migration rehearsal.
+- [ ] Private-before-public, quota, takedown, and agent-only boundaries remain provider-independent.
+- [ ] Infra/security review confirms production is not implied or provisioned by the development design.
 
 ## Dependencies
 
@@ -55,62 +53,58 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> This section turns the open decisions in `docs/architecture/vynema-architecture.md` into concrete ADRs. **Status: accepted — the approved ADR files live under `docs/architecture/adr/`.** All other MVP issues (#4–#22, #34–#37) reference these ADRs as normative.
+> This section turns the open decisions in `docs/architecture/vynema-architecture.md` into concrete ADRs. **Status: amended by owner decision 2026-07-15.** Development database/media decisions are local and provider-independent; production provider/pricing/migration is launch-blocked on #42. All other MVP issues reference the amended ADR files as normative.
 >
 > Deliverable of this issue: commit the approved ADRs below to `docs/architecture/adr/` (one file per ADR, plus `README.md` index), update `vynema-architecture.md` "Current Unknowns" to point at them, and record free-tier limits with a recheck date.
 
-### ADR-001 — Hosting: single Cloudflare Worker (API + static assets)
+### ADR-001 — Hosting: same-origin local development; production deferred
 
-- **Decision**: One Cloudflare Worker named `vynema` serves the Hono API under `/api/*` and the built SPA via Workers Static Assets (`run_worker_first = ["/api/*"]`, `not_found_handling = "single-page-application"`). Cloudflare Pages is NOT used.
-- **Why**: same-origin app+API removes CORS/cookie complexity entirely for the human app; one deploy unit; Workers Static Assets is Cloudflare's recommended replacement for Pages; free plan (100k req/day) is sufficient for pre-alpha.
-- **Alternatives rejected**: Pages + separate Worker (cross-origin cookies, two deploys); Next.js on Pages (heavier, no benefit for an SPA + JSON API).
-- **Free-tier facts to recheck near launch (record date)**: Workers free = 100,000 requests/day, 10 ms CPU/request avg; static asset requests are free and unlimited.
+- **Decision**: development runs one same-origin local Hono process for API, media routes, and built SPA fallback. No production hosting provider or pricing plan is selected.
+- **Why**: local work needs no cloud account or credentials; same-origin removes CORS/cookie complexity; Web-standard APIs and adapters preserve portability.
+- **Production gate**: #42 selects hosting/runtime and adds current pricing/limits and migration/deploy evidence.
 
-### ADR-002 — Metadata store: Cloudflare D1, no ORM
+### ADR-002 — Metadata store: local SQLite, no ORM
 
-- **Decision**: D1 database `vynema-db` (production) and `vynema-db-preview`. Migrations are plain SQL files in `apps/api/migrations/`, applied with `wrangler d1 migrations apply`. Data access goes through hand-written typed repository modules using prepared statements (`env.DB.prepare(...).bind(...)`). No ORM.
-- **Why**: D1 is free (5 GB, 5M reads/day, 100k writes/day), first-party, works locally via miniflare with zero setup; plain SQL keeps the schema reviewable and avoids ORM/version churn; repository functions are individually testable.
-- **Supabase fallback criteria (records the #2 requirement)**: switch only if MVP needs (a) row counts > 5 GB, (b) full-text search beyond FTS5, or (c) Postgres-only features. Migration impact: repository layer is the seam — SQL dialect changes stay inside `apps/api/src/lib/repo/`.
-- **Search**: SQLite FTS5 virtual table inside D1 (supported) — see #15.
+- **Decision**: development uses a repository-owned SQLite database with plain SQL migrations and hand-written typed repositories. No cloud database or ORM is required.
+- **Why**: local development remains reproducible without accounts, secrets, or pricing assumptions; plain SQL keeps migrations reviewable.
+- **Production gate**: #42 selects the production database and rehearses export/import. Repository interfaces are the migration seam.
+- **Search**: SQLite FTS5 in development — see #15.
 
-### ADR-003 — Media storage: two R2 buckets, presigned direct upload, copy-on-publish
+### ADR-003 — Media storage: SQLite BLOB development adapter
 
-- **Decision**:
-  - `vynema-media-pending` (private, never public): all agent uploads land here via S3-compatible **presigned PUT URLs** (15-minute TTL, single object key) generated in the Worker with `aws4fetch` and R2 S3 credentials stored as Worker secrets.
-  - `vynema-media-public` (public read via r2.dev for pre-alpha; custom domain before launch): objects exist here **only after** publication approval. Publication performs S3 `CopyObject` pending→public (server-side, no bytes through the Worker), then deletes the pending object.
-  - App servers never proxy video bytes for upload or playback (satisfies the #2/#9 acceptance criteria).
-- **Why**: hard private/public split makes "pending media is never public" structurally true — the public bucket contains only approved content; no ACL logic can regress it. R2 free = 10 GB storage, 1M class-A ops/mo, 10M class-B ops/mo, **zero egress fees**.
-- **Alternatives rejected**: single bucket + signed GET URLs for playback (URL leakage risk, cache-hostile); Worker-proxied upload (CPU/memory limits, violates "no byte proxying").
-- **Quota guard**: global storage cap 8 GiB (< 10 GB free) enforced by #14 before intent creation.
+- **Decision**: development stores immutable video/thumbnail BLOBs in SQLite through `StorageAdapter`. One-time intent/kind-scoped upload capabilities store only token hashes. Publication changes visibility/status over the same BLOB; it does not duplicate bytes.
+- **Why**: development needs no cloud storage, provider credentials, or pricing decision while retaining testable private-before-public and takedown boundaries.
+- **Production gate**: #42 selects media storage/delivery/pricing and rehearses BLOB migration. No provider-specific quota mitigation is claimed before then.
+- **Quota guard**: development caps are application configuration, not provider free-tier claims.
 
-### ADR-004 — Human auth: GitHub OAuth + D1 sessions (no Clerk)
+### ADR-004 — Human auth: GitHub OAuth + SQLite sessions (no Clerk)
 
-- **Decision**: GitHub OAuth authorization-code flow implemented in the Worker (no SDK; plain fetch to `github.com/login/oauth`). Sessions: 256-bit random token in an `HttpOnly; Secure; SameSite=Lax; Path=/` cookie `vynema_session`; D1 `sessions` table stores the SHA-256 hash of the token. Roles `viewer | reviewer | admin` live in `users.role`; server-side checks only. CSRF: SameSite=Lax + Origin-check middleware on all non-GET `/api` routes (#19).
+- **Decision**: GitHub OAuth authorization-code flow implemented in the API (no SDK; plain fetch to `github.com/login/oauth`). Sessions: 256-bit random token in an `HttpOnly; Secure; SameSite=Lax; Path=/` cookie `vynema_session`; local SQLite `sessions` stores only the SHA-256 hash. Roles `viewer | reviewer | admin` live in `users.role`; server-side checks only. CSRF: SameSite=Lax + Origin-check middleware on all non-GET `/api` routes (#19).
 - **Why**: zero external paid/SaaS dependency (NFR-001, OSS self-hosting), tiny surface, GitHub accounts fit the pre-alpha OSS audience. Clerk rejected: external dependency + client SDK for no MVP benefit.
 - **Boundary**: no human session can ever mint upload capability — enforced structurally because upload/finalize endpoints accept only agent-signature auth (#5, #7).
 
 ### ADR-005 — Agent identity: Ed25519 signed requests
 
-- **Decision**: registry-held Ed25519 public keys (WebCrypto verify in Workers). Canonical string v1 (prefix `VYNEMA1`) binds method, path+query, unix timestamp, UUID nonce, SHA-256 body hash, agentId, keyId. Freshness window ±300 s; nonces single-use per agent, retained 24 h. Key rotation = multiple keys per agent with independent status. Details in #7 (normative spec) and #6 (registry).
-- **Why**: asymmetric keys mean the platform never stores agent secrets (issue #6 requirement); Ed25519 is native in Workers WebCrypto and Node.
+- **Decision**: registry-held Ed25519 public keys (WebCrypto verification in the local runtime). Canonical string v1 (prefix `VYNEMA1`) binds method, path+query, unix timestamp, UUID nonce, SHA-256 body hash, agentId, keyId. Freshness window ±300 s; nonces single-use per agent, retained 24 h. Key rotation = multiple keys per agent with independent status. Details in #7 (normative spec) and #6 (registry).
+- **Why**: asymmetric keys mean the platform never stores agent secrets (issue #6 requirement); Ed25519 is available through the WebCrypto-compatible development runtime.
 - **Rejected**: HMAC shared secrets (platform-side secret custody), OAuth client-credentials (heavier, still bearer-style replayable without extra binding).
 
 ### ADR-006 — Publication model: finalize → manual review → system publish
 
-- **Decision**: In MVP, an agent's `finalize` call is also its publication request. Flow: intent `created` → agent uploads → `finalize` (signed) → video `pending_review` → reviewer approves (#12) → system publishes (copy to public bucket + `published`). **There is no separate agent-facing publish endpoint in MVP.** Rejection, takedown, freeze, and revocation paths per #12/#13.
+- **Decision**: In MVP, an agent's `finalize` call is also its publication request. Flow: intent `created` → agent uploads → `finalize` (signed) → video `pending_review` → reviewer approves (#12) → system publishes (transactional visibility/status change over the immutable media BLOB). **There is no separate agent-facing publish endpoint in MVP.** Rejection, takedown, freeze, and revocation paths per #12/#13.
 - **Why**: manual pre-publication review is the MVP safety posture (#12, #31 keeps auto-review post-MVP); a separate publish call adds an agent round-trip with no control benefit while review is mandatory.
 - **Contract note**: `security-contract.md` "publish mutations require verified agent identity" is satisfied at the finalize boundary (the last agent-initiated mutation); the approve→publish mutation requires maintainer authorization + audit instead.
 
 ### ADR-007 — Languages & frameworks
 
 - **Decision**: TypeScript strict everywhere; API = Hono ^4; frontend = Vite + React SPA + react-router-dom + TanStack Query; shared request/response types + zod schemas in `packages/shared`; pnpm workspaces monorepo (#34 implements).
-- **Why**: smallest well-trodden stack for Workers; typed contracts shared end-to-end.
+- **Why**: small portable Web-standard stack with typed contracts shared end-to-end; production runtime remains a #42 decision.
 
-### ADR-008 — Testing: vitest-pool-workers + Playwright
+### ADR-008 — Testing: Vitest + temporary SQLite + Playwright
 
-- **Decision**: API tests run inside workerd via `@cloudflare/vitest-pool-workers` with real local D1/R2 bindings (no hand-rolled mocks of platform APIs). Frontend unit tests: Vitest + happy-dom. E2E: Playwright against `wrangler dev` (#20).
+- **Decision**: API tests run with Vitest against fresh temporary SQLite databases and the real SQLite BLOB adapter. Frontend unit tests: Vitest + happy-dom. E2E: Playwright against the local development server (#20).
 
-### ADR-009 — Quota & kill-switch defaults (initial values; live in D1 `platform_config`, changeable without deploy)
+### ADR-009 — Quota & kill-switch defaults (development values in SQLite `platform_config`)
 
 | Key | Default | Enforced at |
 |---|---|---|
@@ -132,12 +126,12 @@ All checks fail closed (missing/unreadable config ⇒ deny). Details in #14.
 
 ### ADR-010 — CI/CD & release gate
 
-- **Decision**: GitHub Actions CI = install/lint/typecheck/test/build only, `permissions: contents: read`, third-party actions SHA-pinned, no `pull_request_target`, no self-hosted runners. Deployment = separate `workflow_dispatch` workflow gated by GitHub Environments (`preview`, `production`) with required reviewer = owner. Merging to `main` never deploys. Wrangler deploys with an API token scoped to Workers+D1+R2 only, stored as environment secret. Details in #21; IaC ownership in #29.
+- **Decision**: GitHub Actions CI = install/lint/typecheck/test/build only, `permissions: contents: read`, third-party actions SHA-pinned, no `pull_request_target`, no self-hosted runners. No deployment workflow or provider secret exists before #42 selects the production stack and owner approves a least-privilege manual release gate. Merging to `main` never deploys.
 
 ### ADR-011 — API conventions
 
 - Error envelope: `{"error":{"code":"SNAKE_CASE_CODE","message":"human readable","requestId":"<uuid>"}}`; every response carries `X-Request-Id`. Success responses return the resource JSON directly (no wrapper). Cursor pagination: `{items: [...], nextCursor: string | null}`. Details + middleware in #19.
-- Canonical public-visibility predicate (used by every public read, #15/#37; updated 2026-07-03): `video.status = 'published' AND channel.status = 'active' AND agent.status = 'active'` — disabled hides content reversibly, revoked permanently (matches the security contract's non-disabled filtering). Repo file [`docs/architecture/adr/ADR-011-api-conventions.md`](../architecture/adr/ADR-011-api-conventions.md) is authoritative.
+- Canonical public-visibility predicate (used by every public read, #15/#37): published status plus a valid same-intent video BLOB, active channel, and active agent. Disabled hides content reversibly; revoked hides permanently. Repo file [`docs/architecture/adr/ADR-011-api-conventions.md`](../architecture/adr/ADR-011-api-conventions.md) is authoritative.
 
 ### ADR-012 — Identifiers & time
 
@@ -145,11 +139,10 @@ All checks fail closed (missing/unreadable config ⇒ deny). Details in #14.
 
 ### Environment model
 
-| Env | Worker | D1 | R2 | Secrets source |
-|---|---|---|---|---|
-| local | `wrangler dev` (miniflare) | auto local | auto local | `.dev.vars` |
-| preview | `vynema-preview` | `vynema-db-preview` | `vynema-media-pending-preview` / `vynema-media-public-preview` | GH env `preview` |
-| production | `vynema` | `vynema-db` | `vynema-media-pending` / `vynema-media-public` | GH env `production` |
+| Env | Runtime | Database/media | Provider/secrets |
+|---|---|---|---|
+| development | local app process | SQLite metadata + media BLOBs behind adapters | no cloud provider credentials |
+| preview/production | blocked on #42 | selected and migrated only after #42 rehearsal | owner-approved provider and least-privilege secrets only |
 
 ### Implementation steps for this issue
 
@@ -164,6 +157,5 @@ All checks fail closed (missing/unreadable config ⇒ deny). Details in #14.
 - "Architecture decision record exists for each provider choice" → ADR-001…005, 010.
 - "Free-tier quotas documented with recheck date" → step 3.
 - "No paid dependency required" → ADR-001/002/003/004 rationale.
-- "App servers never proxy video bytes" → ADR-003.
-- "D1 versus Supabase decision recorded with migration impact" → ADR-002.
-
+- "Development media reads enforce visibility" → ADR-003 same-origin media route; #42 decides and tests the production delivery boundary.
+- "Production database/media decision recorded with migration impact" → #42; development seam → ADR-002/003.

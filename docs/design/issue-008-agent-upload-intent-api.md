@@ -17,7 +17,7 @@ Implement the signed agent endpoint that validates video metadata, scope, MIME, 
 - Add `POST /agent/upload-intents` or equivalent endpoint.
 - Validate signed request, active agent, channel scope, declared MIME, file size, SHA-256 hash, provenance declaration, and quota availability.
 - Create `AgentUploadIntent` in pending upload state.
-- Return a short-lived upload capability for direct object storage.
+- Return a short-lived intent/kind-scoped upload capability for development BLOB storage.
 - Return safe structured errors when any validation fails.
 
 ## Out Of Scope
@@ -29,7 +29,7 @@ Implement the signed agent endpoint that validates video metadata, scope, MIME, 
 
 - [ ] Valid allowlisted agents can create upload intents within quota.
 - [ ] Invalid agent, invalid signature, invalid channel, unsupported MIME, oversized file, missing hash, and quota exhaustion are rejected before upload capability issuance.
-- [ ] Upload capability expires quickly and is scoped to a single object key.
+- [ ] Upload capability expires quickly and is scoped to one intent and media kind.
 - [ ] Intent creation emits safe audit and quota events.
 - [ ] API documentation includes request and response examples.
 - [ ] Tests cover success and all rejection paths.
@@ -56,11 +56,16 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4, #6, #7 (`requireAgentSignature`), #14 (quota service), #9 (presigner — can develop in parallel against its spec). This is the first agent capability endpoint: **every check fails closed.**
+> Normative. Prerequisites: #4, #6, #7 (`requireAgentSignature`), #14 (quota service), #9 (`StorageAdapter` and one-time development capability). This is the first agent capability endpoint: **every check fails closed.**
 
 ### 1. Endpoint
 
-`POST /api/agent/upload-intents` — middlewares in order: `rateLimit("agent_intent")` → `requireAgentSignature()` (#7).
+`POST /api/agent/upload-intents` — middlewares in order: coarse
+`rateLimit("agent_pre_auth")` keyed by the trusted peer/global request shape →
+`rateLimit("agent_pre_auth_global")` → `requireAgentSignature()` (#7) →
+`rateLimit("agent_any")` →
+`rateLimit("agent_intent")`, with both agent buckets keyed only by the verified
+`c.get("agent").agentId`. Claimed agent headers never select an agent bucket.
 
 Request body (zod schema `packages/shared/src/schemas/upload-intent.ts`):
 
@@ -80,11 +85,15 @@ Success `201`:
 ```jsonc
 {
   "intentId": "uuid",
-  "video": { "uploadUrl": "https://<account>.r2.cloudflarestorage.com/…&X-Amz-Signature=…", "key": "pending/agt_…/…", "requiredHeaders": { "content-type": "video/mp4", "content-length": "52428800", "x-amz-checksum-sha256": "<base64-of-declared-sha256>" } },
+  "video": { "uploadUrl": "/api/agent/upload-intents/<intentId>/media/video", "requiredHeaders": { "content-type": "video/mp4", "content-length": "52428800", "x-vynema-upload-token": "<one-time capability>" } },
   "thumbnail": { … } ,            // present iff requested
   "expiresAt": "2026-07-02T12:15:00.000Z"
 }
 ```
+
+Export this exact response as `UploadIntentCreatedDto` from
+`packages/shared`; #35 imports it. It intentionally exposes no storage key,
+BLOB id, cloud credential, or provider-specific field.
 
 ### 2. Validation & authorization sequence (normative order)
 
@@ -93,21 +102,50 @@ Success `201`:
 3. Static validation (422 `VALIDATION_FAILED`): mime == `allowed_video_mime` config; `1024 ≤ video.bytes ≤ max_video_bytes`; `durationSeconds ≤ max_declared_duration_seconds`; sha256 = `^[0-9a-f]{64}$`; thumbnail (when present): mime `image/jpeg|image/png`, `bytes ≤ max_thumbnail_bytes`.
 4. Channel check: channel exists AND `channel.agent_id == agentId` — else **404 `NOT_FOUND`** (no ownership oracle). `channel.status == 'frozen'` → 403 `CHANNEL_FROZEN` (add code to #19 registry).
 5. Quota: `checkIntentAllowed` (#14) → may return `UPLOADS_DISABLED` (503) / `QUOTA_EXCEEDED` (429 with `metric`).
-6. Storage config present (`R2_ACCOUNT_ID` + S3 creds) — else 503 `UPLOADS_DISABLED`, audit reason `storage_unconfigured`.
+6. Development `StorageAdapter` is available and writable — else 503 `UPLOADS_DISABLED`, audit reason `storage_unavailable`. Development requires no cloud account or provider credential.
 
-### 3. Object keys & capability issuance
+### 3. Development media capability issuance
 
-- `intentId = crypto.randomUUID()`; keys (normative, per #9): video `pending/{agentId}/{channelId}/{intentId}/video.mp4`, thumbnail `pending/{agentId}/{channelId}/{intentId}/thumb.jpg|png`.
-- Presigned PUT per #9's presigner: TTL **900 s**, single key, with **signed headers** `content-length` (= declared bytes), `content-type` (= declared mime), and `x-amz-checksum-sha256` (= base64 of the declared sha256 bytes). R2 then rejects any upload whose length, type, or hash differs from the declaration — the capability physically cannot store different bytes.
-- The intent row's `expires_at = created_at + 900_000` ms.
+- `intentId = crypto.randomUUID()`. Generate independent 256-bit random one-time
+  tokens for video and optional thumbnail in memory before the transaction;
+  store only SHA-256 token hashes with the intent, kind, immutable expected
+  size/hash/MIME, expiry, and unused status. The persisted intent declaration is
+  the source of those expected values, including `declared_thumbnail_mime`.
+- Return same-origin development PUT routes scoped to that intent and media kind,
+  plus the raw token in `x-vynema-upload-token`. TTL is **900 s**. The token is a
+  narrow upload capability, never logged, and cannot address another intent or
+  media kind.
+- Before reading a byte, the PUT route requires an exact decimal
+  `Content-Length` equal to the persisted expected size and atomically claims
+  the unused capability (`claimed_at IS NULL`, unexpired). Once claimed, that
+  token is burned even if the upload aborts or mismatches; the agent must create
+  a new signed intent. Concurrent reuse therefore permits at most one stream.
+- The route streams to a private temporary file while hashing, aborts at
+  `expected_size + 1`, enforces a bounded stream deadline, and always deletes
+  the temporary file. After exact length/MIME/digest validation, one development
+  SQLite transaction inserts the immutable BLOB and changes the claimed
+  capability to completed (`used_at`). A failure cannot commit a BLOB; an
+  ambiguous client retry queries intent/media state instead of reusing a token.
+- Under the same immediate completion transaction, revalidate capability and
+  intent status/expiry at `nowMs` and require one guarded row before inserting
+  bytes. A cleanup winner therefore makes completion roll back.
+- The intent row's `expires_at = created_at + 900_000` ms. Production upload
+  capabilities and provider credentials are deferred to launch-blocking #42.
 
-### 4. Persistence (the #14 §3 pattern, verbatim)
+### 4. Persistence (the #14 §3 conditional-transaction pattern)
 
-1. `checkIntentAllowed`.
-2. One `db.batch([ INSERT upload_intents…, …buildIntentCreatedStatements() ])` — counters: `intents` +1 (agent, global) AND `storage_bytes` += declared total (agent, global; **reservation** — see #10 §Storage accounting).
-3. `verifyCountersAfterIncrement` — on overshoot: compensating batch (intent → `failed`, reverse counters), respond 429 `QUOTA_EXCEEDED`.
-4. Presign URLs (pure computation, after commit), respond 201.
-5. Audit `intent.created` (agent actor, target intentId, metadata: channelId, declared bytes — never the upload URL).
+1. Generate the raw one-time tokens in memory and derive their hashes. Do not
+   return them yet.
+2. `checkIntentAllowed` is a fast-deny hint. Enforcement happens in one SQLite
+   transaction: conditionally increment the agent/global daily-intent and
+   storage-reservation counters only when each resulting value stays within its
+   cap; insert matching ledger rows, the intent, every capability hash plus its
+   immutable expected metadata, and `intent.created` audit.
+3. Check every conditional-update affected-row count. If any guard affects zero
+   rows, or any later insert fails, roll back the whole transaction and return
+   429/503 as appropriate. There is no committed overshoot and no compensating
+   transaction.
+4. Return the raw tokens only after commit succeeds.
 
 Denials at steps 2–6 (§2) audit `intent.denied` with internal reason.
 
@@ -124,7 +162,13 @@ apps/api/test/upload-intent.test.ts
 
 | Case | Expect |
 |---|---|
-| valid request within quota | 201; DB row `created`; URL contains key, `X-Amz-Expires=900`; requiredHeaders correct; counters +1/+bytes; ledger rows |
+| valid request within quota | 201; DB row `created`; intent/kind-scoped same-origin upload URLs and one-time token headers returned; raw tokens absent from DB/logs; counters +1/+bytes; ledger rows |
+| upload token scope/reuse | token cannot upload another intent/kind and cannot be reused; mismatch leaves no committed BLOB |
+| thumbnail JPEG/PNG binding | both valid declarations round-trip; MIME substitution and partially-null thumbnail metadata fail without BLOB/`used_at` commit |
+| upload resource bounds | missing/wrong `Content-Length`, chunked oversize, `expectedSize+1`, timeout, and disconnect fail; temp file removed; claimed token is not reusable |
+| concurrent token use | barrier before claim CAS; exactly one request streams, at most one BLOB commits |
+| upload completion vs expiry cleanup | barrier after stream; cleanup-first blocks completion and leaves no BLOB, upload-first is later deleted/accounted by cleanup; neither order leaves reservation-free bytes |
+| failure injection during intent transaction | failure after each statement leaves no intent/capability/counter/ledger/audit row and returns no raw token |
 | unsigned / bad signature | 401 (from #7; one smoke case here) |
 | valid **human session cookie**, no signature | 401 `AGENT_AUTH_FAILED` (boundary test, cite for launch-blocker evidence) |
 | other agent's channel | 404 |
@@ -137,11 +181,10 @@ apps/api/test/upload-intent.test.ts
 | 6th intent today (cap 5) | 429 `QUOTA_EXCEEDED`, metric `per_agent_daily_intents` |
 | would exceed agent storage cap | 429, metric `per_agent_active_storage_bytes` |
 | `uploads_enabled=false` | 503 `UPLOADS_DISABLED` |
-| S3 creds absent | 503, audit `storage_unconfigured`, **no intent row created** |
+| local adapter unavailable/unwritable | 503, audit `storage_unavailable`, **no intent row created**; no cloud credential is read |
 | revoked agent | 403 `AGENT_REVOKED` |
 | audit rows | `intent.created` / `intent.denied` present; metadata has no URL/signature |
 
 ### 7. Acceptance mapping & PR evidence
 
-Issue bullets map 1:1 to §6 rows. PR evidence: full test output, sample 201 response (redact account id), security impact note ("creates upload capability — fail-closed order §2 enforced"), and explicit note that the presigned URL constrains length+type+hash.
-
+Issue bullets map 1:1 to §6 rows. PR evidence: full test output, redacted sample 201 response, security impact note ("creates upload capability — fail-closed order §2 enforced"), and evidence that token scope/expiry/reuse plus length/type/hash checks prevent cross-intent or mismatched BLOB writes.

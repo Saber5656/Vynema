@@ -93,13 +93,21 @@ Order is normative:
 
 **All failures in steps 1–3, 4(unknown/inactive-key), 5, 6 return the SAME external response**: `401 {"error":{"code":"AGENT_AUTH_FAILED","message":"Agent authentication failed"}}` — no oracle about which check failed. The internal reason goes ONLY to the audit event `agent.auth_failed` (metadata: `{reason, claimedAgentId}` — never the signature or body). Steps 4 revoked/disabled return their distinct 403 codes (registry state is not an oracle worth hiding; agents must know to stop).
 
-Replay containment: nonce uniqueness covers 24 h ≫ the ±300 s freshness window, so a captured request can never be replayed: inside the window the nonce blocks it, outside the timestamp blocks it. Purge of expired nonces = #10's cron.
+Replay containment: nonce uniqueness covers 24 h ≫ the ±300 s freshness window, so a captured request can never be replayed: inside the window the nonce blocks it, outside the timestamp blocks it. Purge of expired nonces = #10's callable cleanup job.
 
-The nonce is claimed in step 6 (middleware) BEFORE the downstream handler runs its side effects, and D1 enforces the `(agent_id, nonce)` UNIQUE constraint atomically per statement. So two *concurrent* identical requests (not just sequential replays) both reach step 6, exactly one INSERT wins, and the other returns `replayed_nonce` — no transaction-isolation-level configuration is required. If the downstream side-effect batch fails after the nonce is claimed, the nonce is spent (fail-safe, never fail-open): the agent must retry with a fresh nonce.
+The nonce is claimed in step 6 (middleware) BEFORE the downstream handler runs its side effects, and SQLite enforces the `(agent_id, nonce)` UNIQUE constraint atomically per statement. So two *concurrent* identical requests (not just sequential replays) both reach step 6, exactly one INSERT wins, and the other returns `replayed_nonce` — no application lock is required. If the downstream side-effect transaction fails after the nonce is claimed, the nonce is spent (fail-safe, never fail-open): the agent must retry with a fresh nonce.
 
 Algorithm agility is intentionally OUT of scope for MVP: Ed25519 is the only accepted signature algorithm (see #6's SPKI prefix validation), and there is no key-type/version field. Supporting a second algorithm later would require a versioned key-type column and a signature-suite selector; it is not a silent extension point.
 
-Mount a coarse unauthenticated rate limit before the verifier, keyed by IP/global request shape rather than claimed agent id. Apply `rateLimit("agent_any", …)` only after `requireAgentSignature()` succeeds, keyed by the verified `agentId`, so unauthenticated callers cannot steer or exhaust another agent's bucket.
+Mount coarse unauthenticated IP and global limits before the verifier, never a
+claimed agent id. Development derives IP from the server-observed socket peer
+and ignores forwarding headers; forwarded addresses are trusted only from an
+explicit proxy allowlist defined by #19/#42. Apply **every agent-keyed bucket**
+only after signature success, keyed exclusively by the verified context. A
+claimed header can never steer another agent's allowance. Endpoint order is
+normative: `agent_pre_auth` (trusted IP) → `agent_pre_auth_global` →
+`requireAgentSignature()` → `agent_any` → endpoint-specific verified-agent
+bucket → handler. Missing peer identity still consumes the global bucket.
 
 ### 4. Client guidance (goes into `docs/agents/signing.md`, finished by #18)
 
@@ -107,7 +115,7 @@ Sign with the same canonical string; send within 300 s; never reuse nonces; on `
 
 ### 5. Test plan (`apps/api/test/agent-signature.test.ts`)
 
-Fixtures: generate an Ed25519 keypair in-test (node:crypto in vitest-pool-workers supports WebCrypto — use `crypto.subtle.generateKey`), register agent+key via #6 repo directly.
+Fixtures: generate an Ed25519 keypair in-test with Node WebCrypto (`crypto.subtle.generateKey`), register agent+key via #6 repository directly.
 
 | # | Case | Expect |
 |---|---|---|
@@ -122,7 +130,7 @@ Fixtures: generate an Ed25519 keypair in-test (node:crypto in vitest-pool-worker
 | 9 | disabled agent | 403 AGENT_DISABLED |
 | 10 | revoked agent | 403 AGENT_REVOKED |
 | 11 | exact replay (same everything) | first 200, second 401 |
-| 11a | concurrent exact replay (`Promise.all` ×2, same nonce) | exactly one 200, one 401 (`replayed_nonce`); no double side effect |
+| 11a | concurrent exact replay (same nonce; test-only barrier holds both requests immediately before nonce INSERT, then releases both together) | exactly one 200, one 401 (`replayed_nonce`); downstream side-effect spy/count is exactly 1 |
 | 12 | same nonce, different agent | both 200 (nonce is per-agent) |
 | 13 | query-string added after signing | 401 |
 | 14 | signature not base64 | 401 (no 500) |

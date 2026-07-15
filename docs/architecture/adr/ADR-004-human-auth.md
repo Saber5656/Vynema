@@ -1,12 +1,12 @@
-# ADR-004: GitHub OAuth With First-Party D1 Sessions (No Clerk)
+# ADR-004: GitHub OAuth With First-Party SQLite Sessions (No Clerk)
 
-Status: accepted (owner decision 2026-07-03)
+Status: amended (owner decision 2026-07-15; GitHub OAuth retained, session store moved to local SQLite)
 Supersedes: `docs/architecture/provider-decisions.md` ADR-005 (Clerk Hobby first)
 Issue: #2 (implementation: #5)
 
 ## Decision
 
-- Human auth = GitHub OAuth authorization-code flow implemented in the Worker
+- Human auth = GitHub OAuth authorization-code flow implemented in the API
   with plain `fetch` (no SDK), requesting NO scopes (public profile only). The
   callback is a GET request, so it is not covered by the non-GET Origin-check
   middleware; CSRF is closed instead by a per-login `state` value (random,
@@ -14,7 +14,7 @@ Issue: #2 (implementation: #5)
   validates against the cookie before exchanging the authorization code
   (specified in full in issue #5).
 - Sessions: 256-bit random token in an `HttpOnly; Secure; SameSite=Lax` cookie;
-  D1 stores only the SHA-256 hash. GitHub access tokens are discarded after the
+  SQLite stores only the SHA-256 hash. GitHub access tokens are discarded after the
   initial profile fetch and never stored.
 - Roles `viewer | reviewer | admin` live in `users.role`; checks are always
   server-side. First admin is promoted manually (no auto-admin).

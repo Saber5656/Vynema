@@ -10,7 +10,7 @@ file.
 
 ## Summary
 
-Bootstrap the Vynema application skeleton so that every implementation issue (#4 onward) has a concrete codebase to land in. Today the repository contains documentation only. This issue creates the monorepo layout, toolchain, Cloudflare Workers app shell, frontend shell, shared contracts package, local development flow, and baseline checks.
+Bootstrap the Vynema application skeleton so that every implementation issue (#4 onward) has a concrete codebase to land in. This issue creates the monorepo layout, local Hono API/server, SQLite development database, frontend shell, shared contracts package, and baseline checks without choosing a production cloud.
 
 This issue was split out because issues #4–#22 all implicitly assume an existing codebase, and no existing issue owns creating it.
 
@@ -18,16 +18,16 @@ This issue was split out because issues #4–#22 all implicitly assume an existi
 
 - Create the pnpm workspace monorepo layout (`apps/api`, `apps/web`, `packages/shared`, `tools/`).
 - Set up TypeScript (strict), ESLint, Prettier, Vitest, and build scripts.
-- Create the Cloudflare Worker app shell with Hono, serving `/api/*` routes and static SPA assets from one Worker.
+- Create the local Hono app/server, serving `/api/*`, development media routes, and static SPA assets from one same-origin process.
 - Create the Vite + React SPA shell with routing and a health screen.
-- Create `wrangler.toml` with D1 / R2 bindings (placeholder IDs), local dev via `wrangler dev`.
+- Create local SQLite configuration and migration startup; no cloud binding or placeholder provider id.
 - Document local development in `docs/development.md`.
 
 ## Out Of Scope
 
 - Any product feature (auth, upload, publication, moderation).
 - CI workflows (issue #21) — but scripts created here must be CI-invokable.
-- Real Cloudflare resource creation (issue #21 / #29).
+- Any production cloud resource, provider credential, deployment, or pricing decision (#42).
 
 ## Acceptance Criteria
 
@@ -54,10 +54,10 @@ This issue was split out because issues #4–#22 all implicitly assume an existi
 |---|---|
 | Package manager | pnpm **10.x**, workspace mode. pnpm 10 blocks dependency lifecycle (install) scripts by default — keep that default as a supply-chain control; if a dependency genuinely needs a build script, allowlist it explicitly via `pnpm.onlyBuiltDependencies` in the root `package.json` with a comment justifying it (expected: none). |
 | Language | TypeScript 5.x, `strict: true` everywhere |
-| API framework | Hono ^4 on Cloudflare Workers |
+| API framework | Hono ^4 on the local Node 22 server adapter; Web-standard handlers stay portable |
 | Frontend | Vite ^5 + React ^18 + react-router-dom ^6 + @tanstack/react-query ^5 |
-| Single origin | One Worker serves both `/api/*` (Hono) and static SPA assets (Workers Static Assets). No Cloudflare Pages. No CORS needed for the first-party web app. |
-| Tests | Vitest ^2. API tests use `@cloudflare/vitest-pool-workers` (runs in workerd with real D1/R2 local bindings). |
+| Single origin | One local process serves `/api/*`, `/media/*`, and the SPA. No CORS needed for the first-party web app. |
+| Tests | Vitest ^2 with a fresh temporary SQLite database and real SQLite BLOB adapter per test suite. |
 | Node version | 22.x (`.nvmrc` = `22`) |
 
 ### 2. Directory layout (create exactly this)
@@ -72,14 +72,14 @@ This issue was split out because issues #4–#22 all implicitly assume an existi
 /tsconfig.base.json
 /apps/api/
   package.json                # name: @vynema/api
-  wrangler.toml
+  src/server.ts                # local Node entry
   tsconfig.json
   vitest.config.ts
   .dev.vars.example
-  migrations/                 # D1 SQL migrations (filled by #4)
+  migrations/                 # SQLite SQL migrations (filled by #4)
     0001_init.sql             # created by #4, NOT this issue; keep dir with .gitkeep
   src/
-    index.ts                  # Worker entry: export default app
+    index.ts                  # exports app factory
     app.ts                    # builds the Hono app, mounts routes
     env.ts                    # Env type: bindings + vars (single source of truth)
     routes/
@@ -142,45 +142,16 @@ Root `package.json` scripts (workspace fan-out; each package defines its own `bu
 
 `tsconfig.base.json`: `"strict": true`, `"target": "ES2022"`, `"module": "ESNext"`, `"moduleResolution": "Bundler"`, `"noUncheckedIndexedAccess": true`, `"forceConsistentCasingInFileNames": true`, `"skipLibCheck": true`.
 
-### 4. `apps/api/wrangler.toml` (exact content; placeholder IDs are intentional)
+### 4. Local runtime and database configuration
 
-```toml
-name = "vynema"
-main = "src/index.ts"
-compatibility_date = "2026-06-01"
-
-# Static SPA assets built by @vynema/web.
-# run_worker_first ensures /api/* always reaches the Worker.
-[assets]
-directory = "../web/dist"
-binding = "ASSETS"
-not_found_handling = "single-page-application"
-run_worker_first = ["/api/*"]
-
-[[d1_databases]]
-binding = "DB"
-database_name = "vynema-db"
-database_id = "PLACEHOLDER-SET-IN-ISSUE-21"
-
-[[r2_buckets]]
-binding = "MEDIA_PENDING"
-bucket_name = "vynema-media-pending"
-
-[[r2_buckets]]
-binding = "MEDIA_PUBLIC"
-bucket_name = "vynema-media-public"
-
-[vars]
-ENVIRONMENT = "local"
-PUBLIC_MEDIA_BASE_URL = "http://127.0.0.1:8787/dev-media"
-
-[observability]
-enabled = true
-```
-
-Notes:
-- `wrangler dev` provisions local D1/R2 automatically (miniflare); placeholder `database_id` is fine for local. Issue #21 replaces IDs per environment.
-- Secrets (`GITHUB_OAUTH_CLIENT_SECRET`, `R2_S3_ACCESS_KEY_ID`, `R2_S3_SECRET_ACCESS_KEY`, `SESSION_SECRET`) are NOT in this file. `.dev.vars.example` lists them with `changeme` values; developers copy to `.dev.vars` (gitignored — verify `.gitignore` covers `.dev.vars` and add if missing).
+- `apps/api/src/server.ts` uses `@hono/node-server` on
+  `http://127.0.0.1:8787`, mounts the Hono app, serves `apps/web/dist`, and falls
+  back to `index.html` for non-API/non-media routes.
+- `VYNEMA_DB_PATH` defaults to `.local/vynema.sqlite`; startup creates `.local/`,
+  opens SQLite, enables `PRAGMA foreign_keys=ON`, and applies pending migrations.
+- `apps/api/.env.example` contains only safe placeholders for optional GitHub
+  OAuth/session development values. `.env` and `.local/` are gitignored.
+- No cloud URL, bucket/database id, deploy token, or provider secret is defined.
 
 ### 5. Code specifications
 
@@ -188,21 +159,13 @@ Notes:
 
 ```ts
 export type Env = {
-  DB: D1Database;
-  MEDIA_PENDING: R2Bucket;
-  MEDIA_PUBLIC: R2Bucket;
-  ASSETS: Fetcher;
-  ENVIRONMENT: "local" | "preview" | "production";
-  PUBLIC_MEDIA_BASE_URL: string;
+  db: Database;
+  storage: StorageAdapter;
+  environment: "development";
   // Secrets (optional at type level; features fail closed when absent):
   GITHUB_OAUTH_CLIENT_ID?: string;
   GITHUB_OAUTH_CLIENT_SECRET?: string;
-  R2_S3_ACCESS_KEY_ID?: string;
-  R2_S3_SECRET_ACCESS_KEY?: string;
-  R2_ACCOUNT_ID?: string;
   SESSION_SECRET?: string;
-  CF_CACHE_PURGE_TOKEN?: string;  // zone-scoped cache purge for takedown (#11); optional until custom domain
-  CF_ZONE_ID?: string;
 };
 ```
 
@@ -216,11 +179,11 @@ import { Hono } from "hono";
 import type { Env } from "./env";
 import { healthRoute } from "./routes/health";
 
-export function buildApp() {
-  const app = new Hono<{ Bindings: Env }>();
+export function buildApp(env: Env) {
+  const app = new Hono();
+  app.use("*", async (c, next) => { c.set("env", env); await next(); });
   app.route("/api", healthRoute);
-  // Later issues mount more routes here. Assets are served automatically
-  // for non-/api paths because of run_worker_first = ["/api/*"].
+  // Later issues mount more routes here. server.ts owns SPA static fallback.
   app.notFound((c) =>
     c.json({ error: { code: "NOT_FOUND", message: "Not found", requestId: "" } }, 404)
   );
@@ -229,12 +192,10 @@ export function buildApp() {
 ```
 
 ```ts
-// index.ts
-import { buildApp } from "./app";
-export default buildApp();
+// index.ts exports buildApp; server.ts constructs local env and starts Node.
 ```
 
-`routes/health.ts`: Hono sub-router; `GET /health` returns `200 {"status":"ok","environment":c.env.ENVIRONMENT}`.
+`routes/health.ts`: Hono sub-router; `GET /health` returns `200 {"status":"ok","environment":"development"}`.
 
 #### 5.3 `apps/web/src/lib/api.ts`
 
@@ -267,37 +228,35 @@ export type HealthResponse = { status: "ok"; environment: string };
 
 ### 6. Test setup
 
-- `apps/api/vitest.config.ts` uses `defineWorkersConfig` from `@cloudflare/vitest-pool-workers/config` with `wrangler: { configPath: "./wrangler.toml" }`.
-- `apps/api/test/health.test.ts`: import `SELF` from `cloudflare:test`, call `SELF.fetch("http://x/api/health")`, assert status 200 and body `{status:"ok", environment:"local"}`. (Set `ENVIRONMENT` via miniflare vars if needed.)
+- `apps/api/vitest.config.ts` uses standard Vitest node environment.
+- `apps/api/test/health.test.ts`: create a temporary SQLite file and adapter, call `buildApp(env).request("http://x/api/health")`, assert status 200 and body `{status:"ok", environment:"development"}`, then remove the temporary directory.
 - `apps/web` tests run with `environment: "happy-dom"`; `App.test.tsx` mocks `fetch` and asserts the shell renders.
-- Note: the assets binding is not served by vitest-pool-workers; API tests must only hit `/api/*`.
 
 ### 7. Step-by-step implementation order
 
 1. Root files (`package.json`, `pnpm-workspace.yaml`, `.nvmrc`, tsconfigs, eslint flat config with `typescript-eslint` recommended, prettier). Checkpoint: `pnpm install` succeeds.
 2. `packages/shared` (build = `tsc -p tsconfig.json` emitting to `dist/`, with `exports` map). Checkpoint: `pnpm --filter @vynema/shared build`.
 3. `apps/web` shell. Checkpoint: `pnpm --filter @vynema/web build` produces `apps/web/dist/index.html`.
-4. `apps/api` shell + wrangler.toml. Checkpoint: `pnpm --filter @vynema/api dev` then `curl http://127.0.0.1:8787/api/health` returns ok; `curl http://127.0.0.1:8787/` returns the SPA HTML.
+4. `apps/api` local server + SQLite bootstrap. Checkpoint: `pnpm --filter @vynema/api dev` then `curl http://127.0.0.1:8787/api/health` returns ok; `curl http://127.0.0.1:8787/` returns the SPA HTML.
 5. Vitest configs + the two tests. Checkpoint: `pnpm test` green.
-6. `docs/development.md`: prerequisites (Node 22, pnpm 10), install, dev, test, lint commands, `.dev.vars` setup, and a troubleshooting note that placeholder D1 IDs are expected until #21.
-7. Update `.gitignore`: add `node_modules/`, `dist/`, `.wrangler/`, `.dev.vars`, `*.local` if not present.
+6. `docs/development.md`: prerequisites (Node 22, pnpm 10), install, dev, test, lint, SQLite path/reset/backup, and optional local OAuth setup.
+7. Update `.gitignore`: add `node_modules/`, `dist/`, `.local/`, `.env`, `*.sqlite`, `*.sqlite-*` if not present.
 
 ### 8. Guardrails
 
 - Do NOT add: deploy scripts, GitHub Actions, `pull_request_target`, any dependency not listed above, any secret value.
 - Pin dependency majors as listed; use caret ranges within majors.
-- PR must include the security-contract evidence block (this touches repo tooling): state "no workflow changes, no secrets, placeholder IDs only".
+- PR must include the security-contract evidence block: state "no workflow changes, no cloud resources or provider credentials".
 
 ### 9. PR / evidence checklist
 
 - [ ] Output of `pnpm build && pnpm test && pnpm lint && pnpm typecheck` pasted in PR.
 - [ ] `curl /api/health` output pasted in PR.
-- [ ] Confirmation that `.dev.vars` is gitignored (`git check-ignore apps/api/.dev.vars`).
+- [ ] Confirmation that `.env` and `.local/` are gitignored.
 
 ---
 Stable Issue Key: AIT-MVP-026
 Classification: MVP Blocking
 Dependencies: #2
 Labels: area/platform, area/infra, type/implementation, priority/p0, mvp-blocking
-
 

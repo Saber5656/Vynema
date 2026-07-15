@@ -1,6 +1,6 @@
 # ADR-006: Finalize Is The Publication Request; Review Approval Publishes
 
-Status: accepted (owner decision 2026-07-03)
+Status: amended (original owner decision 2026-07-03; SQLite BLOB visibility amendment 2026-07-15)
 Aligns with: `docs/architecture/provider-decisions.md` ADR-006 (direct MP4, manual review)
 Issue: #2 (implementation: #10, #11, #12)
 
@@ -10,7 +10,7 @@ In the MVP, an agent's signed `finalize` call is also its publication request:
 
 ```text
 intent created -> agent uploads -> finalize (signed) -> pending_review
-  -> reviewer approves -> system publishes (copy to public bucket)
+  -> reviewer approves -> system publishes (transactional visibility change over the immutable BLOB)
   -> or reviewer rejects
 ```
 

@@ -59,7 +59,7 @@ Source Task: TSK-1260
 
 1. Error envelope + typed error throwing/handling.
 2. Request-ID middleware + safe structured logging.
-3. D1-backed fixed-window rate limiter.
+3. SQLite-backed fixed-window rate limiter.
 4. Origin-check (CSRF) middleware for session-authenticated mutations.
 5. CORS policy (deny-by-default; agent API is CORS-irrelevant, web app is same-origin).
 6. Zod validation helper producing consistent 422s.
@@ -75,10 +75,13 @@ export const ERROR_CODES = [
   "FORBIDDEN",              // 403 authenticated but not allowed
   "AGENT_AUTH_FAILED",      // 401 signature verification failed (#7; generic on purpose)
   "AGENT_REVOKED",          // 403
+  "AGENT_DISABLED",         // 403
+  "CHANNEL_FROZEN",         // 403 active agent owns a frozen channel (#8)
   "NOT_FOUND",              // 404 generic
   "VIDEO_NOT_FOUND",        // 404
   "COMMENT_NOT_FOUND",      // 404
   "INTENT_NOT_FOUND",       // 404
+  "INTENT_EXPIRED",         // 410
   "VALIDATION_FAILED",      // 422 zod failure; details[] included
   "QUOTA_EXCEEDED",         // 429 quota boundary (#14); detail.metric included
   "RATE_LIMITED",           // 429 request-rate boundary; detail.retryAfterSeconds
@@ -119,11 +122,18 @@ Global `app.onError`: if `ApiError`, respond `{error:{code, message, requestId, 
 
 - Middleware (outermost): `const requestId = crypto.randomUUID()`; store via `c.set("requestId", id)`; set response header `X-Request-Id`.
 - `logLine(c, fields)` emits ONE `console.log(JSON.stringify({...}))` per request from a finalization middleware: `{ts, requestId, method, path, status, durationMs, actorType, actorId, errorCode?, quotaOutcome?}`.
-- **Redaction rules (normative)**: never log request bodies, `authorization`/`cookie`/`x-vynema-signature` headers, session tokens, upload URLs, or object keys of non-public objects. Add `test/logging.test.ts` asserting a request with a signature header produces a log line NOT containing the signature value (spy on console.log).
+- **Redaction rules (normative, default deny)**: never log request/response
+  bodies, media bytes, BLOB ids, capability/upload URLs, storage keys,
+  `authorization`, `cookie`, `x-vynema-signature`, or
+  `x-vynema-upload-token`, nor session/upload tokens. Structured log fields are
+  an allowlist; header/body/exception serialization is never merged wholesale.
+  `test/logging.test.ts` covers success, validation failure, 500, timeout, and
+  aborted upload and asserts the exact signature, upload token, BLOB id, URL,
+  and media sample are absent from console/audit/error output.
 
 ### 4. Rate limiter (`apps/api/src/lib/middleware/rate-limit.ts`)
 
-D1 fixed window (table `rate_limits` from #4):
+SQLite fixed window (table `rate_limits` from #4):
 
 ```ts
 export function rateLimit(scope: string, opts: { windowSeconds: number; max: number; keyFn: (c) => string | null })
@@ -131,21 +141,38 @@ export function rateLimit(scope: string, opts: { windowSeconds: number; max: num
 
 - Window start = `floor(nowSec / windowSeconds) * windowSeconds`. Key = `${scope}:${keyFn(c)}`; `keyFn` returns null → skip (e.g., unauthenticated GET).
 - Atomic increment: `INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, 1) ON CONFLICT(key, window_start) DO UPDATE SET count = count + 1 RETURNING count`. If returned count > max → throw `errors.rateLimited(windowEnd - nowSec)`.
-- **Fail-closed for capability paths**: if the D1 write itself fails on agent upload/finalize routes, deny (503); for public GETs, allow (availability over strictness) — flag choice per route via `failMode: "closed" | "open"`.
-- Cleanup of old windows happens in the #10 cron (`DELETE FROM rate_limits WHERE window_start < now - 2*window`).
+- **Fail-closed for capability paths**: if the SQLite write itself fails on agent upload/finalize routes, deny (503); for public GETs, allow (availability over strictness) — flag choice per route via `failMode: "closed" | "open"`.
+- Cleanup of old windows happens in the #10 callable cleanup job (`DELETE FROM rate_limits WHERE window_start < now - 2*window`).
 
 Default limits (constants in `apps/api/src/lib/limits.ts`):
 
 | Scope | Key | Window | Max |
 |---|---|---|---|
-| `auth_login` | IP (`CF-Connecting-IP`) | 600 s | 10 |
-| `agent_intent` | agentId | 3600 s | 10 |
-| `agent_finalize` | agentId | 3600 s | 20 |
-| `agent_any` | agentId | 60 s | 30 |
+| `auth_login` | trusted client IP | 600 s | 10 |
+| `agent_pre_auth` | trusted client IP | 60 s | 60 |
+| `agent_pre_auth_global` | one global key | 60 s | 600 |
+| `agent_intent` | verified agentId | 3600 s | 10 |
+| `agent_finalize` | verified agentId | 3600 s | 20 |
+| `agent_any` | verified agentId | 60 s | 30 |
 | `comment` | userId | 300 s | 10 |
 | `report` | userId | 3600 s | 20 |
 | `reaction` | userId | 60 s | 30 |
 | `public_search` | IP | 60 s | 30 |
+For agent capability routes, middleware order is normative: `agent_pre_auth` →
+`agent_pre_auth_global` → signature verification (#7) → `agent_any` → the
+endpoint-specific agent bucket. `keyFn` for
+an agent bucket reads only the verified request context and returns `null`
+before authentication; it never reads a claimed agent header. Tests prove an
+invalid request claiming another agent id cannot increment that agent's bucket.
+
+`trustedClientIp(c)` is also normative. In direct local development it uses the
+server-observed socket peer address and ignores `CF-Connecting-IP`,
+`X-Forwarded-For`, and `Forwarded`. A forwarded client address may be accepted
+only when the immediate socket peer is in an explicit trusted-proxy allowlist;
+production proxy/provider configuration belongs to #42. Missing/unparseable
+addresses use the global bucket, never a caller-selected string. Tests prove
+spoofed forwarding headers do not change the key, while a configured trusted
+proxy does, and that a global ceiling still applies.
 
 ### 5. Origin check (CSRF) middleware
 
@@ -157,7 +184,7 @@ Applied to every `/api` route with method != GET/HEAD/OPTIONS **that uses cookie
 
 - Same-origin web app ⇒ NO CORS headers on `/api` by default (absence = deny).
 - `OPTIONS` preflights: respond 204 without ACAO (deny) except for future documented needs.
-- The R2 presigned upload is cross-origin at the bucket, not the Worker; bucket CORS is #9's scope.
+- Development media upload/read routes are same-origin. Production media-domain CORS, if any, is deferred to #42.
 - Agent endpoints are server-to-server; CORS irrelevant but harmless to leave denied.
 
 ### 7. Validation helper
@@ -187,10 +214,12 @@ Mount order in `app.ts` (normative): request-id → logger → origin-check → 
 |---|---|
 | envelope shape | thrown `ApiError(422)` → body matches `{error:{code,message,requestId,details}}`, header `X-Request-Id` equals body requestId |
 | unexpected error | route throwing `new Error("boom")` → 500 INTERNAL, generic message, no "boom" in body |
+| error registry completeness | extract every backticked API error code used by active issue designs; each exists in `ERROR_CODES`, and route contract fixtures assert status/code/envelope (including `CHANNEL_FROZEN` and `INTENT_EXPIRED`) |
 | rate limit | scope max=2: 3rd request in window → 429 + `Retry-After`; new window → allowed again |
 | rate limit fail-closed | make DB stmt throw (drop table in test) → capability route 503, public route passes |
 | origin check | POST with `Origin: https://evil.example` → 403; matching origin → pass; no origin + form content-type → 403 |
 | CORS deny | OPTIONS with Origin → response has no `Access-Control-Allow-Origin` |
+| sensitive logging | success, 422, 500, timeout, and aborted upload logs contain none of the exact signature/token/URL/BLOB-id/media sample values |
 
 ### 10. Acceptance mapping
 

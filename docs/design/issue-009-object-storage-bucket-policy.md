@@ -1,4 +1,4 @@
-# Issue #9: Configure direct object storage upload path and bucket policy
+# Issue #9: Implement development media StorageAdapter and capability policy
 
 GitHub issue: https://github.com/Saber5656/Vynema/issues/9
 
@@ -10,15 +10,15 @@ file.
 
 ## Summary
 
-Configure object storage for direct agent uploads of short web-ready MP4 files while preventing public access to unreviewed objects and avoiding app-server video byte proxying.
+Implement local SQLite BLOB media storage and one-time agent upload capabilities while preventing public access to unreviewed media and preserving a production migration seam.
 
 ## Scope
 
-- Configure R2 or selected equivalent object storage buckets for upload, private pending objects, and public playback access pattern.
-- Define object key naming with agent, channel, intent, and collision-safe segments.
-- Configure CORS only for required upload flows.
-- Ensure upload capabilities cannot overwrite unrelated objects.
-- Document object lifecycle and cleanup rules.
+- Implement provider-independent development media storage using SQLite BLOBs behind `StorageAdapter`.
+- Define intent/kind-scoped one-time upload capabilities and immutable media ids.
+- Keep development upload/read routes same-origin with no CORS grant.
+- Ensure upload capabilities cannot write unrelated intents/kinds or consume unbounded temporary resources.
+- Document BLOB lifecycle, ownership, retention, and cleanup rules.
 
 ## Out Of Scope
 
@@ -27,12 +27,12 @@ Configure object storage for direct agent uploads of short web-ready MP4 files w
 
 ## Acceptance Criteria
 
-- [ ] Agents upload directly to object storage using scoped short-lived capability.
-- [ ] Pending objects are not publicly accessible.
+- [ ] Agents upload through a scoped, short-lived, one-time development capability.
+- [ ] Pending BLOBs are not publicly accessible.
 - [ ] Public playback only becomes available after review and publication.
-- [ ] Object keys are unguessable or authorization-safe.
-- [ ] Bucket policy prevents broad write/read access.
-- [ ] Infra/security review confirms storage policy and CORS restrictions.
+- [ ] Routes never accept a caller-selected BLOB id and always resolve ownership/visibility.
+- [ ] One-time capability claim, byte/deadline bounds, and cleanup fail closed.
+- [ ] Data/security review confirms storage ownership and same-origin restrictions.
 
 ## Dependencies
 
@@ -52,77 +52,114 @@ Source Task: TSK-1260
 
 ---
 
-## Implementation Plan & Design (added 2026-07-02)
+## Implementation Plan & Design (amended 2026-07-15)
 
-> Normative. Implements ADR-003. This issue = bucket provisioning + policy + presigner module + policy-evidence docs. Consumed by #8 (presign), #10 (verify/cleanup), #11 (publish copy), #13 (quarantine).
+> Normative for development. Implements ADR-003. Production database, media
+> storage, delivery, provider, pricing, credentials, and migration are deferred
+> to launch-blocking issue #42.
 
-### 1. Buckets & access posture
+### 1. StorageAdapter boundary
 
-| Bucket | Public access | Written by | Read by |
-|---|---|---|---|
-| `vynema-media-pending` (+ `-preview`) | **NONE** — no r2.dev, no custom domain, ever | agents via presigned PUT; Worker via binding `MEDIA_PENDING` | Worker binding only |
-| `vynema-media-public` (+ `-preview`) | r2.dev enabled for pre-alpha; custom domain `media.<domain>` required before launch (#24 item) | Worker (publish copy #11) | anonymous GET via public URL |
+`apps/api/src/lib/storage/adapter.ts` is the only media persistence interface:
 
-- Playback URL construction: `${PUBLIC_MEDIA_BASE_URL}/${public_object_key}` — `PUBLIC_MEDIA_BASE_URL` var per environment (r2.dev URL now, custom domain later; NO code change on switch).
-- Public bucket has **no list** exposure (r2.dev/custom domains never allow listing). Key layout `{videoId}/video.mp4` — videoId is a UUID; enumeration infeasible; and everything in this bucket is by-construction approved-public content, so even full enumeration exposes nothing non-public.
-- CORS: **none on either bucket.** Agents upload server-to-server (no browser); `<video>` playback does not require CORS for non-`crossorigin` media elements. Any future browser-upload feature would be a requirement change (AGENTS.md boundary).
+```ts
+type MediaKind = "video" | "thumbnail";
+type MediaHead = { id: string; size: number; sha256: string; mime: string };
 
-### 2. Object key layout (normative)
-
-```
-pending bucket:
-  pending/{agentId}/{channelId}/{intentId}/video.mp4
-  pending/{agentId}/{channelId}/{intentId}/thumb.jpg|thumb.png
-  quarantine/{videoId}/video.mp4            # takedown evidence (#13)
-public bucket:
-  {videoId}/video.mp4
-  {videoId}/thumb.jpg|thumb.png
+interface StorageAdapter {
+  withTransaction<T>(fn: (tx: StorageTransaction) => Promise<T>): Promise<T>;
+  commitVerifiedUpload(tx: StorageTransaction, args: { capabilityId: string; intentId: string; kind: MediaKind; tempFile: PrivateTempFile; expectedSize: number; expectedSha256: string; expectedMime: string; nowMs: number }): Promise<MediaHead>;
+  head(intentId: string, kind: MediaKind): Promise<MediaHead | null>;
+  readRange(blobId: string, offset: number, length: number): Promise<Uint8Array>;
+  read(blobId: string, range?: { offset: number; length: number }): Promise<ReadableStream>;
+  deleteOwned(tx: StorageTransaction, args: { blobId: string; intentId: string; kind: MediaKind }): Promise<boolean>;
+}
 ```
 
-### 3. Credentials (least privilege)
+Application routes never query `media_blobs.content` directly. This keeps the
+development representation from becoming the production contract.
+`StorageTransaction` and `PrivateTempFile` are opaque development types: the
+SQLite adapter uses the transaction to insert the BLOB and set the already
+claimed capability's `used_at` atomically. A production adapter must not claim
+cross-provider atomicity; #42 must instead design staging, idempotency,
+reconciliation, and cleanup that preserve the same logical invariant.
+All development deletes run inside `withTransaction` and receive that same
+repository/adapter SQLite transaction. `deleteOwned` includes intent and kind in
+its predicate and the caller checks its affected-row result, so reference
+clearing, owned-BLOB deletion, counters/ledger, and audit commit atomically.
 
-- One R2 S3 API token, scope: **Object Read & Write on exactly `vynema-media-pending` and `vynema-media-public`** (needed for presigned PUT on pending, and S3 CopyObject pending→public and public→quarantine). Admin/account-level tokens forbidden.
-- Worker secrets: `R2_ACCOUNT_ID`, `R2_S3_ACCESS_KEY_ID`, `R2_S3_SECRET_ACCESS_KEY` (via `wrangler secret put` / `.dev.vars` locally). Never in `wrangler.toml` or code.
-- Bindings `MEDIA_PENDING` / `MEDIA_PUBLIC` already exist from #34.
+### 2. SQLite BLOB implementation
 
-### 4. Presigner (`apps/api/src/lib/storage/presign.ts`)
+- `SQLiteBlobStorageAdapter` stores immutable bytes in #4 `media_blobs`.
+- Upload streams to a private temporary file while computing SHA-256, then
+  inserts the verified bytes as one immutable SQLite BLOB transaction. The temp
+  file is always removed; mismatch never commits partial bytes.
+- Require exact persisted `Content-Length` before streaming, stop after
+  `expectedSize + 1`, and apply a bounded request/stream deadline. An atomic
+  `claimed_at IS NULL` compare-and-set runs before streaming. The first accepted
+  attempt burns the token even on mismatch, timeout, or disconnect, so
+  concurrent reuse cannot multiply temporary-disk or hashing work.
+- `readRange` validates non-negative, overflow-safe bounds. Public reads never
+  accept a blob id from the caller; they resolve video id through the canonical
+  visibility predicate first.
+- Publication changes only `videos.status`; it never copies or deletes media.
+  Takedown hides immediately and retains the BLOB as evidence.
+- Completion begins with an immediate SQLite write lock and a conditional guard
+  requiring matching scope/metadata, claimed+unused+unexpired capability, and an
+  owning intent still `created` and unexpired at `nowMs`. Exactly one affected
+  row is required before BLOB insertion. Zero rows or any later failure rolls
+  back BLOB and completion together. This serializes with #10 cleanup: a
+  cleanup-first winner blocks completion; an upload-first winner is later
+  deleted with its reservation release in one cleanup transaction.
 
-- Dependency: `aws4fetch` (^1). `new AwsClient({accessKeyId, secretAccessKey, service: "s3", region: "auto"})`.
-- `presignPendingPut(env, {key, contentLength, contentType, sha256Hex, expiresSeconds = 900}): Promise<{url, requiredHeaders}>`:
-  - URL: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com/vynema-media-pending/${key}?X-Amz-Expires=900`.
-  - `aws.sign(url, {method:"PUT", headers: {"content-length": …, "content-type": …, "x-amz-checksum-sha256": base64(hexToBytes(sha256Hex))}, aws: {signQuery: true, allHeaders: true}})`.
-  - Signing these headers makes R2 enforce them at PUT time: wrong length/type/hash ⇒ upload rejected by storage itself.
-- `copyObject(env, {srcBucket, srcKey, destBucket, destKey}): Promise<void>` — S3 CopyObject: signed `PUT https://…/{destBucket}/{destKey}` with header `x-amz-copy-source: /{srcBucket}/{srcKey}`; throw on non-200. Server-side copy — **no video bytes flow through the Worker** (upload: direct to R2; playback: direct from public URL; publish: in-storage copy). This satisfies the no-byte-proxy rule end to end.
-- Testability seam: routes call `storage.presignPendingPut` / `storage.copyObject` via a `StorageAdapter` interface (`apps/api/src/lib/storage/adapter.ts`). Tests inject a double whose `copyObject` uses the local R2 bindings (get→put with `arrayBuffer()`, fine for KB-sized fixtures); presign is tested for URL structure (host, path, `X-Amz-Expires`, `X-Amz-SignedHeaders` includes the three headers) using fixed fake credentials + `vi.setSystemTime`.
+### 3. One-time upload capability
 
-### 5. Provisioning & lifecycle (manual commands now; #29 owns IaC posture)
+- #8 creates a 256-bit token scoped to exactly one intent and media kind, valid
+  for 900 seconds. Store only SHA-256(token).
+- The PUT route compares token hashes in constant time, rejects expired,
+  claimed, or used tokens, and obtains expected metadata only from the persisted
+  capability/intent. It claims before reading, then atomically marks completion
+  with the verified BLOB commit. A claimed-but-incomplete token is terminal and
+  cleanup releases its intent reservation; ambiguous clients query state.
+- Raw tokens, BLOB ids, media bytes, and non-public identifiers are never logged.
 
-```sh
-wrangler r2 bucket create vynema-media-pending
-wrangler r2 bucket create vynema-media-public
-wrangler r2 bucket lifecycle add vynema-media-pending --abort-multipart-days 1   # (flag names: verify against current wrangler; intent is: abort incomplete multipart uploads after 1d)
-```
+### 4. Development public-read boundary
 
-- Do not configure a broad provider-level expiry on `pending/`: finalized uploads in `pending_review` still use pending object keys until review approval or rejection, and must not be deleted by an age-only rule. Let #10's DB-aware cleanup delete only failed/expired or publish-crash orphans. `quarantine/` prefix has NO expiry (evidence retention until manual purge).
-- Enable r2.dev on the public bucket only; record the URL as `PUBLIC_MEDIA_BASE_URL`.
-- Preview-environment buckets: same commands with `-preview` suffix.
+- Same-origin routes `/media/videos/:id/video` and `/thumbnail` re-check
+  `public_read_enabled` and the #15 visibility predicate on every request.
+- Responses use `Cache-Control: no-store` in development and support bounded
+  Range requests. `Content-Type` comes only from the verified persisted BLOB
+  metadata (never a request/query value) and every media response sets
+  `X-Content-Type-Options: nosniff`. Pending/rejected/taken-down/disabled/
+  revoked/frozen content is always denied.
+- Provider domains, public buckets, CDN/cache behavior, and hard spend stops are
+  not selected here; #42 must prove equivalent boundaries before release.
 
-### 6. Policy evidence (`docs/security/storage-policy.md` — new file, required for #23)
+### 5. Policy evidence (`docs/security/storage-policy.md`)
 
-Contents: the two-bucket table (§1), key layout (§2), token scope (§3), lifecycle rules (§5), plus a **verification checklist with expected results**:
+Record tests proving: capability scope/expiry/reuse rejection; no raw token in
+DB/logs; mismatch leaves no BLOB; pending media route 404; published media/range
+read succeeds; takedown immediately denies while evidence remains; kill switch
+denies media; orphan cleanup is idempotent. Add fault injection between BLOB
+insert and `used_at`, a claim-CAS concurrency barrier, size+1/timeout/disconnect
+cases, and an ambiguous-retry case; no outcome may leave committed bytes with a
+reusable token or a completed token without recoverable bytes.
+Add a barrier after streaming but before the completion guard and race expiry
+cleanup in both orders; no reservation-free BLOB may remain.
 
-1. `curl -s -o /dev/null -w "%{http_code}" https://<account>.r2.cloudflarestorage.com/vynema-media-pending/pending/test` → 401 (unauthenticated S3 API).
-2. Pending bucket has no public development URL: confirm in dashboard/API; screenshot or `wrangler r2 bucket info` output.
-3. Presigned URL for key A cannot PUT key B (signature bound to path) → 403; expired URL (>900 s) → 403.
-4. Public bucket URL serves a published object 200; a made-up key → 404; no directory listing at bucket root.
+### 6. Step-by-step order
 
-Run these once against the preview environment when #21 provisions it and paste outputs into this doc (marked with date).
+1. Adapter interface. 2. SQLite BLOB implementation and migration. 3. One-time
+capability PUT route. 4. visibility-checked media routes. 5. cleanup and policy
+evidence. 6. Keep all production provisioning blocked on #42.
 
-### 7. Step-by-step order
+### 7. Acceptance mapping & PR evidence
 
-1. `presign.ts` + adapter interface + structure tests. 2. Local dev support: since presigned URLs point at real R2, local flow uses a dev-only route `PUT /dev-upload/:key` (mounted ONLY when `ENVIRONMENT === "local"`, writes via binding, guarded by a test that it 404s when env != local) — #35 CLI uses it via `PUBLIC_MEDIA_BASE_URL`-style override; document in `docs/development.md`. 3. `docs/security/storage-policy.md`. 4. Provisioning commands doc (execution happens with #21; keep this issue code+docs).
-
-### 8. Acceptance mapping & PR evidence
-
-- "Direct upload with scoped short-lived capability" → §4 presign (900 s, single key, header-bound). "Pending objects not publicly accessible" → §1 posture + §6 checks 1–2. "Public playback only after review" → public bucket contains only #11-copied objects. "Keys unguessable/authorization-safe" → §2 UUIDs + §1 list-denial. "Bucket policy prevents broad access" → §3 token scope + §6. "CORS restricted" → §1 (none, with rationale).
-- PR evidence: presigner test output, storage-policy doc, security impact note ("storage capability boundary; no public access to pending").
+- Scoped short-lived capability → §3 tests.
+- Private before publication and takedown → §4 visibility matrix.
+- Provider independence → no cloud credential/config requirement and adapter-only
+  BLOB access.
+- Release migration → #42 must test a staged production adapter/double and may
+  not model an external object store plus database as one atomic transaction.
+- PR evidence: adapter/capability/media-route tests, migration test, secret scan,
+  and security impact note.
