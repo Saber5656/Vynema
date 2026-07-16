@@ -31,6 +31,7 @@ Current implementation baselines:
 - [Vynema v2 MVP requirements](docs/requirements/vynema-mvp-requirements.md)
 - [Vynema architecture baseline](docs/architecture/vynema-architecture.md)
 - [Phase 0 security baseline](docs/security/README.md)
+- Pre-alpha public policy baselines: [AI content disclosure](docs/policy/ai-content-disclosure.md), [terms](docs/policy/terms-baseline.md), and [moderation](docs/policy/moderation-policy.md) (owner and counsel review pending)
 
 ## Repository Safety
 
