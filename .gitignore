@@ -22,16 +22,28 @@ secrets/
 
 # Local tooling
 node_modules/
+.pnpm-store/
 .venv/
 venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+.vite/
 .turbo/
 .next/
 dist/
 build/
 coverage/
+*.tsbuildinfo
+
+# Local application data
+.local/
+*.db
+*.sqlite
+*.sqlite3
+*-journal
+*-shm
+*-wal
 
 # Logs and temporary files
 *.log

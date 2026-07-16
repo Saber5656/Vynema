@@ -1,0 +1,18 @@
+{
+  "name": "@vynema/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "pnpm build && node --env-file-if-exists=.env dist/src/server.js",
+    "start": "node --env-file-if-exists=.env dist/src/server.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.9",
+    "@vynema/shared": "workspace:*",
+    "hono": "^4.12.30"
+  }
+}
