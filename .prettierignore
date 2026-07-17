@@ -1,0 +1,9 @@
+# Historical documentation predates the application-tooling baseline. Format it
+# only in the issue that owns a deliberate documentation-wide rewrite.
+docs/**
+!docs/development.md
+!docs/design/
+docs/design/**
+!docs/design/issue-034-application-skeleton.md
+PROJECT-STATUS.md
+SECURITY.md
