@@ -17,6 +17,9 @@ Related current baselines:
 - `docs/security/README.md`
 - `docs/security/vynema-threat-model.md`
 - `docs/security/security-contract.md`
+- `docs/policy/ai-content-disclosure.md` - pre-alpha baseline; owner and counsel review pending
+- `docs/policy/terms-baseline.md` - pre-alpha baseline; owner and counsel review pending
+- `docs/policy/moderation-policy.md` - pre-alpha baseline; owner and counsel review pending
 
 ## Product Definition
 
