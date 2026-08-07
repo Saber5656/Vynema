@@ -488,7 +488,11 @@ CREATE TABLE rate_limits (
 - `apps/api/src/lib/repo/types.ts`: one `XxxRow` type per table, field-for-field (snake_case as stored; do NOT camelCase rows — mapping to DTOs happens in routes).
 - `apps/api/src/lib/repo/db.ts`: helpers `nowMs()`, `newId()` (= `crypto.randomUUID()`), `one<T>(stmt)`, `all<T>(stmt)`, and `transaction(fn)` wrapping SQLite transactions for atomic multi-statement sequences.
 - `apps/api/src/lib/repo/config.ts`: `getConfig(db): Promise<PlatformConfig>` — reads ALL rows once per request, parses booleans/ints, **throws `ConfigUnavailableError` if any expected key is missing** (fail closed; #14 depends on this).
-- Local seed fixtures for dev only: `apps/api/scripts/seed-local.sql` inserting one test agent (`agt_local0000001` with the #35 test-vector public key), one channel `local-test`, and a comment explaining how to promote your own user to admin (`UPDATE users SET role='admin' WHERE github_login='<you>';`). Document in `docs/development.md`. Never apply to production.
+- The local-only test agent/channel/key fixture and `seed-local.sql` usage
+  documentation are out of scope for #4 and owned by #46. Issue #46 consumes
+  the finalized #35 signing-vector public key and `keyId` after this schema is
+  available. Never add private-key material or apply local fixtures to
+  production.
 
 ### 5. Step-by-step order
 
@@ -496,7 +500,9 @@ CREATE TABLE rate_limits (
 2. Write `0002_seed_config.sql`; verify 13 config rows exist.
 3. Add row types + db helpers + `config.ts`.
 4. Tests (§6).
-5. `docs/development.md#database` section: apply/reset/inspect commands using the selected local SQLite CLI/library, backup restore, and seed-local usage.
+5. `docs/development.md#database` section: apply/reset/inspect commands using
+   the selected local SQLite CLI/library and backup restore. Issue #46 adds the
+   separate local-fixture application and usage instructions.
 
 ### 6. Tests (`apps/api/test/schema.test.ts`)
 

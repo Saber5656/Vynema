@@ -68,7 +68,7 @@ Issues within a wave can proceed in parallel; a wave needs its predecessors subs
 - [ ] #24 Launch readiness & go/no-go
 - [ ] #1 / #3 closed with owner confirmation
 
-## Current implementation state (2026-07-18)
+## Current implementation state (2026-07-17)
 
 Merged artifacts and issue acceptance are separate gates. A merged partial
 artifact does not complete its issue while the required human or runtime
@@ -81,18 +81,20 @@ evidence is still missing, so the checklist above remains unchanged.
 | #36 | PR #43 contains the public policy documents | Owner and counsel approval, plus #13 runtime moderation evidence, are still missing | Open; unchecked |
 
 The technical foundation for Wave 2 is present on `main`. The owner has
-authorized the #4 / #19 / #21 execution slice. Each lane now has its exact task
-branch created from the same latest `origin/main` commit
+authorized the #4 / #19 / #21 execution slice. Each lane now has its exact local
+task branch created from the same latest `origin/main` commit
 (`b53b32d8067fe7050c63128583ea24397c510b42`), has recorded a clean Branch Plan,
-and is in progress with implementation investigation. This is start evidence,
-not implementation completion or merge evidence. Issue #38's tracker-only lane
-is also in progress and exclusively owns this file for the slice.
+and is in progress with implementation investigation. The #4 and #19 branches
+are local-only planning evidence and are not published for review; the #21
+branch is published as PR #48. These branch names are start evidence, not
+implementation completion or merge evidence. Issue #38's tracker-only lane is
+also in progress and exclusively owns this file for the slice.
 
 | Lane | Current state | Publication gate |
 |---|---|---|
-| #4 local SQLite schema | In progress on `codex/issue-4-sqlite-schema`; implementation investigation started | Ready PR may be created after implementation, tests, and required role reviews |
-| #19 API platform | In progress on `codex/issue-19-api-platform`; implementation investigation started | Non-DB work may be committed locally, but no push or PR until #4 is merged and the real #4 migrations pass the integration test; do not stack on the #4 branch |
-| #21 checks-only CI | In progress on `codex/issue-21-checks-only-ci`; implementation investigation started | Ready PR requires checks-only implementation, required role reviews, and actual green-run evidence; deployment remains blocked on #42 |
+| #4 local SQLite schema | In progress on local-only branch `codex/issue-4-sqlite-schema`; implementation investigation started | Ready PR may be created after implementation, tests, and required role reviews |
+| #19 API platform | In progress on local-only branch `codex/issue-19-api-platform`; implementation investigation started | Non-DB work may be committed locally, but no push or PR until #4 is merged and the real #4 migrations pass the integration test; do not stack on the #4 branch |
+| #21 checks-only CI | Published as PR #48 from `codex/issue-21-checks-only-ci`; implementation and hosted check evidence are available for review | Ready PR requires checks-only implementation, required role reviews, and actual green-run evidence; deployment remains blocked on #42 |
 | #38 tracker sync | In progress | This tracker file is the lane's only repository-owned path |
 
 ### Fixture and #35 split gates
@@ -101,7 +103,8 @@ is also in progress and exclusively owns this file for the slice.
   local-only test agent, channel, and agent-key fixture formerly coupled to
   #4. It waits for the #4 schema and the finalized signing-vector public key /
   `keyId`; this keeps incomplete #35 artifacts out of schema delivery and all
-  production migrations.
+  production migrations. The canonical #4 design marks this fixture as out of
+  scope and defers its implementation and usage documentation to #46.
 - Before #35 implementation begins, split its work into a signing/vectors
   issue and an upload/status client issue. The signing/vector side owns the
   deterministic vector and public-key contract consumed by #46; the
