@@ -13,6 +13,6 @@
   "dependencies": {
     "@hono/node-server": "^2.0.9",
     "@vynema/shared": "workspace:*",
-    "hono": "^4.12.30"
+    "hono": "^4.12.34"
   }
 }
