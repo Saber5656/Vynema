@@ -36,7 +36,11 @@ Create the automated test coverage required to launch the v2 MVP with confidence
 
 ## Dependencies
 
-- AIT-MVP-004 through AIT-MVP-019.
+- Preparation gate: frozen design contracts from #4–#19 and #34–#37,
+  including #35S/#35. Feature-local harness and traceability work may begin
+  before every implementation merges.
+- Final acceptance and ready-PR gate: the relevant #4–#19 and #34–#37
+  product surfaces are implemented, and #54 plus #56 are merged.
 
 ## Notes
 
@@ -46,7 +50,7 @@ Create the automated test coverage required to launch the v2 MVP with confidence
 ---
 Stable Issue Key: AIT-MVP-020
 Classification: MVP Blocking
-Dependencies: AIT-MVP-004 through AIT-MVP-019
+Dependencies: prep = frozen #4–#19/#34–#37 contracts including #35S; final = implemented #4–#19/#34–#37 surfaces + #54 + #56
 Recommended Labels: area/testing, type/quality, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -54,12 +58,12 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Unit/integration tests are delivered INSIDE each feature issue (every design section above specifies its own test table). This issue delivers: (1) the E2E journey suite, (2) the launch-blocker traceability map, (3) the manual local-development smoke checklist, (4) coverage reporting. Prerequisites: #4–#19, #34–#37 largely landed; #35 CLI for agent-flow E2E. Production-environment smoke evidence is blocked on #42.
+> Normative. Unit/integration tests are delivered INSIDE each feature issue (every design section above specifies its own test table). This issue delivers: (1) the E2E journey suite, (2) the launch-blocker traceability map, (3) the manual local-development smoke checklist, (4) coverage reporting. Preparation may begin in feature-local test paths once the referenced contracts are frozen. Final acceptance and ready-PR publication require the relevant #4–#19 and #34–#37 product surfaces, #54 public media reads, and #56 upload/finalize/status CLI to be implemented and merged. #20 does not wait for #55; #55 final consumes #20 final. Production-environment smoke evidence is blocked on #42.
 
 ### 1. E2E suite (`e2e/` workspace package, Playwright)
 
 - `e2e/package.json` (`@vynema/e2e`), `playwright.config.ts`: `webServer = { command: "pnpm --filter @vynema/web build && pnpm --filter @vynema/api dev --port 8787", url: "http://127.0.0.1:8787/api/health", timeout: 120000 }`; single `chromium` project; `workers: 1` because scenarios mutate shared switches/quotas; `pnpm test:e2e` at root.
-- Seeding (`e2e/seed.ts`, runs in `globalSetup`): create a temporary SQLite DB, bootstrap admin by the documented local command, then use product paths — admin API creates agent + channel (#6), #35 CLI performs keygen/upload/finalize through the one-time capability (#9), review API approves. Fixture video: tiny structurally valid MP4 committed at `e2e/fixtures/tiny.mp4` (<100 KB, provenance in adjacent README).
+- Seeding (`e2e/seed.ts`, runs in `globalSetup`): create a temporary SQLite DB, bootstrap admin by the documented local command, then use product paths — admin API creates agent + channel (#6), #35S supplies keygen/signing/vectors, #56 performs upload/finalize/status through #9A's one-time capability, and the review API approves. Fixture video: tiny structurally valid MP4 committed at `e2e/fixtures/tiny.mp4` (<100 KB, provenance in adjacent README).
 - Auth in E2E: real GitHub OAuth is not scriptable — add a **local-only** login route `POST /api/dev/login {githubLogin, role}` mounted ONLY when `ENVIRONMENT === "local"` (same guard pattern as #9's dev-upload; include the test that it 404s when env≠local). E2E uses it to mint viewer/reviewer/admin sessions.
 
 Journeys (one spec file each):
