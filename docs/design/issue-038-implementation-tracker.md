@@ -34,7 +34,7 @@ push, and ready-PR publication wait for every hard predecessor to merge.
 | S3 — Identity/upload chain | #6→#7, #9A, #46/#21 sidecars, then #8→#10 | #8 waits for #6+#7+#14+#9A; #10 waits for #7+#8+#9A+#14 |
 | S4 — Publication/agent ops | #11 and #18 | #11 and #18 merged; #11 precedes #12 |
 | S5 — Reads/review/CLI | #15, #12, #56 upload/finalize/status CLI (#35U) | #56 waits for #8+#10+#18; shared integration for #15/#12 is serialized |
-| S6 — Product fan-out | #16, #54 public media reads (#9B), #37 backend | #54 waits for #9A+#15; #37 full UI integration waits for #16 |
+| S6 — Product fan-out | #16 UI/mock preparation, #54 public media reads (#9B), #37 backend | #54 waits for #9A+#15; #16 integration and ready PR wait for #54; #37 full UI integration waits for #16 |
 | S7 — Moderation/interactions | #13, #55 admin audit/observability/runbooks (#22B) prep, #20 prep, then #17 | #13 precedes #17; #55 stays preparatory until emitters/#18/#20 exist |
 | S8 — Quality/security | #20 final, then #55 final; #23 local-core security closure | #20 final waits for #54/#56 and implemented product surfaces; #55 final then consumes #20 final plus implemented audit emitters |
 | S9 — Release branch | #42 final decision, then #29 + production implementation Issues, #23 final addendum, #24 | Merge, release, provisioning, and deploy remain separate human gates |
@@ -56,6 +56,7 @@ The aliases in parentheses identify the retained parent Issue numbers.
 #6 + #7 + #8 + #10 + #14 + #35S -> #18
 #8 + #10 + #18                  -> #35U (#56)
 #9A + #15                       -> #9B (#54)
+#9B (#54)                        -> #16 integration/ready PR
 #5 + #15 + #16 + #19            -> #37 full integration
 #5 + #6 + #11 + #12 + #15 + #36 + #37 -> #13
 #5 + #13 + #15 + #16 + #19      -> #17
@@ -166,7 +167,7 @@ also in progress and exclusively owns this file for the slice.
 | Storage accounting (reservation model) | #10 (canonical) = #14 (amended) | #8, #11 |
 | Video status transitions (single writer) | #11 §1 | #12, #13 |
 | Development media write/capability contract | #9A/#9 | #8, #10, #11, #12 preview, #54 |
-| Development public media-read boundary | #9B/#54 + #15 predicate | #13, #16, #20 final, #55 runbooks |
+| Development public media-read boundary | #9B/#54 + #15 predicate | #13, #16 integration/ready PR, #20 final, #55 runbooks |
 | Audit action registry and metadata redaction | #22A/#22 | all feature emitters, #55 |
 | Whole-product E2E and boundary evidence | #20 | #55, #23, #24, #42 |
 | Admin audit/runbook evidence | #22B/#55 | #23, #24, #42 |
