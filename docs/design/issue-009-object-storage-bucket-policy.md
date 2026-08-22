@@ -155,20 +155,26 @@ They consume #9A's adapter/write contract and #15's visibility predicate.
 digest/MIME mismatch cleanup, claim-CAS races, byte/deadline bounds, ambiguous
 retry, and ownership-checked orphan cleanup.
 
-#54 records private-before-public, published/range reads, takedown,
-revocation/disablement, the public-read kill switch, and the absence of private
-storage identifiers in public DTOs. The shared policy document must identify
-which Issue/PR produced each row.
+#54 records private-before-public, published/range reads, pending/failed/
+rejected/taken-down/disabled/revoked/frozen denials, the public-read kill
+switch, allowed restoration, and the absence of private storage identifiers in
+public DTOs. The shared policy document must identify which Issue/PR produced
+each row.
 
-Record tests proving: capability scope/expiry/reuse rejection; no raw token in
-DB/logs; mismatch leaves no BLOB; pending media route 404; published media/range
-read succeeds; takedown immediately denies while evidence remains; kill switch
-denies media; orphan cleanup is idempotent. Add fault injection between BLOB
-insert and `used_at`, a claim-CAS concurrency barrier, size+1/timeout/disconnect
-cases, and an ambiguous-retry case; no outcome may leave committed bytes with a
-reusable token or a completed token without recoverable bytes.
-Add a barrier after streaming but before the completion guard and race expiry
-cleanup in both orders; no reservation-free BLOB may remain.
+#9A tests prove capability scope/expiry/reuse rejection; no raw token in
+DB/logs; mismatch leaves no BLOB; orphan cleanup is idempotent; fault injection
+between BLOB insert and `used_at`; claim-CAS concurrency; size+1/timeout/
+disconnect; and ambiguous retry. No outcome may leave committed bytes with a
+reusable token or a completed token without recoverable bytes. A barrier after
+streaming but before the completion guard races expiry cleanup in both orders;
+no reservation-free BLOB may remain.
+
+#54 tests prove pending/failed/rejected/taken-down/disabled/revoked/frozen media
+routes deny access; published video/thumbnail and bounded Range reads succeed;
+takedown and the kill switch deny immediately; allowed restoration re-enables
+access only after the shared predicate passes; and public responses never leak
+private storage identifiers. Earlier Issues do not call or implement these
+anonymous routes.
 
 ### 6. Step-by-step order
 

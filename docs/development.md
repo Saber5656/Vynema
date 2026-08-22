@@ -104,7 +104,8 @@ CI-invokable but issue #34 does not add a workflow.
 
 - Issue #4 owns product schema, migration SQL, row types, seed data, and
   backup/recovery behavior.
-- Issue #9 owns media BLOB storage, `StorageAdapter`, media routes, and upload
-  capability work.
+- Issue #9A/#9 owns media BLOB storage, `StorageAdapter`, scoped writes, and
+  upload capability work. Issue #9B/#54 owns anonymous public media routes and
+  transition-policy evidence.
 - This local skeleton does not create cloud resources, deployment automation,
   credentials, or a human upload path.

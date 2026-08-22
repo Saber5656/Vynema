@@ -89,7 +89,7 @@ Table: every row of `docs/security/launch-blocker-checklist.md` → the automate
 | Secret exposure | `secret-scan.yml` + #21 CI runs + manual history scan record |
 | Human upload capability | #5 `authz-boundary.test.ts` + #8 boundary case + `no-human-upload.spec.ts` |
 | Unauthenticated agent upload/publish | #7 test table (missing/invalid/revoked/stale/nonce/hash) + #8 unsigned case |
-| Pending/rejected media exposure | #15 visibility matrix + #11 visibility-checked media/BLOB-retention assertions + `moderation-takedown.spec.ts` + authorized preview smoke §3 |
+| Pending/rejected media exposure | #15 metadata predicate matrix + #54 anonymous media-route transition matrix + #11 BLOB-retention/state assertions + `moderation-takedown.spec.ts` + authorized preview smoke §3 |
 | Replayable signed request | #7 cases 11–12 |
 | Quota/cost bypass | #14 boundary tests + `quota-killswitch.spec.ts` |
 | Release/deploy gate bypass | #21 workflow review checklist |

@@ -116,17 +116,18 @@ transaction.
 |---|---|---|
 | `uploads_enabled` | intent creation → 503 `UPLOADS_DISABLED`; finalize of EXISTING intents still allowed (they hold storage already) | #8 |
 | `publication_enabled` | review approval returns 503 `PUBLICATION_DISABLED`; queue/reject still work | #11/#12 |
-| `public_read_enabled` | public discovery APIs and the development media route → 503 `SERVICE_DEGRADED`; UI shows a static "temporarily read-limited" notice; admin+agent endpoints unaffected | #15/#16 |
+| `public_read_enabled` | public discovery APIs and the development media route → 503 `SERVICE_DEGRADED`; UI shows a static "temporarily read-limited" notice; admin+agent endpoints unaffected | #15 discovery, #54 media routes, #16 UI |
 
 Switch flips are config updates (§5) — **no deploy, no code change**, satisfying "kill switch without redeploying".
 
 ### 4a. Provider read/spend boundary and QT-004
 
 Development stores media as SQLite BLOBs behind `StorageAdapter`. The application
-serves development media through its own authenticated/visibility-checked route,
-so `public_read_enabled=false` gates both discovery and media bytes. Development
-tests can therefore count requests synchronously and prove the switch fails
-closed without any cloud account or provider credential.
+serves development media through #54's visibility-checked anonymous route, so
+`public_read_enabled=false` gates both discovery and media bytes. #14 proves the
+config lookup and switch policy fail closed; #15 proves discovery 503 behavior;
+#54 proves media-route 503/no-store behavior. These development tests need no
+cloud account or provider credential.
 
 This does **not** claim that QT-004 is mitigated for release. A production media
 provider, delivery path, pricing model, measurable operation/byte boundary, and
@@ -177,8 +178,8 @@ correct `metric`); barrier race at cap−1 gives one commit and never exposes a
 committed counter over cap; fault injection after every §3 statement rolls back
 all state; UTC-day rollover reconciles separately; double release and
 insufficient-gauge release affect zero rows and roll back; switches off →
-correct 503 codes; `public_read_enabled=false` denies
-both development discovery and media routes; `ConfigUnavailableError` → deny;
+correct fail-closed policy result; #15 owns discovery HTTP 503 tests and #54
+owns media-route 503/no-store tests; `ConfigUnavailableError` → deny;
 §5 config update happy/unknown-key/bad-type + audit row; §6 reconciliation.
 Production provider-spend tests are blocked on #42 and must not be marked
 passing in this issue.
@@ -196,5 +197,5 @@ apps/api/test/quota.test.ts
 
 ### 9. Acceptance mapping & PR evidence
 
-- "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → `SERVICE_DEGRADED` wiring (#15 completes; state split in PR); "admins see quota state" → §5.
+- "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → fail-closed switch policy here, #15 discovery HTTP evidence, and #54 anonymous media-route evidence; "admins see quota state" → §5.
 - PR evidence: boundary test table output + reconciliation test output + security impact note ("quota/cost boundary — fail-closed verified").

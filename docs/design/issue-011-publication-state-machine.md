@@ -16,8 +16,8 @@ Implement the controlled state machine that turns finalized agent submissions in
 
 - Define upload and publication states across intent, review, video asset, and moderation records.
 - Create public `VideoAsset` records only from approved finalized intents.
-- Store AI-generated labels, agent/provenance metadata, the same-intent immutable BLOB reference, and moderation state; public media routes resolve access from video id and status.
-- Ensure rejected or pending submissions never appear in public APIs.
+- Store AI-generated labels, agent/provenance metadata, the same-intent immutable BLOB reference, and moderation state. #15 consumes the publication state for public metadata; #54 consumes it for anonymous media-route access.
+- Persist rejected and pending submissions in non-public states; #15 and #54 own the corresponding public metadata and anonymous media-route suppression.
 - Add idempotency for repeated approve/publish actions.
 
 ## Out Of Scope
@@ -27,12 +27,12 @@ Implement the controlled state machine that turns finalized agent submissions in
 
 ## Acceptance Criteria
 
-- [ ] Pending and rejected submissions are not visible in public feed/search/channel APIs.
+- [ ] Pending and rejected submissions remain in non-public states consumed by #15's public predicate and #54's anonymous media-route boundary.
 - [ ] Approved submissions create exactly one public video asset.
 - [ ] Public video records include required AI/provenance labels where safe.
 - [ ] Publication state transitions are audited.
 - [ ] Idempotent retry does not create duplicate public videos.
-- [ ] Tests prove public visibility only after approval.
+- [ ] Tests prove only approval creates the published state, immutable BLOB reference, publication counters, and safe metadata; #15 and #54 own public HTTP visibility assertions.
 
 ## Dependencies
 
@@ -43,7 +43,7 @@ Implement the controlled state machine that turns finalized agent submissions in
 
 ## Notes
 
-- This issue should be reviewed together with moderation and public metadata APIs.
+- This issue should be reviewed together with moderation and public metadata APIs. It owns state transitions and stored references, while #15 owns public metadata predicates and #54 owns anonymous media-route transition assertions.
 
 ---
 Stable Issue Key: AIT-MVP-011
@@ -123,9 +123,10 @@ Sequence:
    `thumbnail_blob_id` do not change. If a cap guard fails, roll back and return
    429. If the status CAS affects zero rows, roll back all quota/audit writes,
    re-load, and apply the §1a idempotent/409 rule.
-4. Return the published video. The development media route reads through the
-   `StorageAdapter` only when the canonical public-visibility predicate still
-   holds, so the committed status transition is the exposure boundary.
+4. Return the published video. The committed status transition and immutable
+   BLOB references are this Issue's output. #15's shared predicate and #54's
+   anonymous media route consume that state; #11 neither implements nor calls
+   the anonymous route.
 
 Partial-failure notes: status, counters, ledger, and audit commit together in
 the development SQLite transaction. Media bytes are immutable and are not
@@ -146,8 +147,9 @@ retry the rolled-back publication transaction.
 
 Conditionally update `published` → `taken_down` in one SQLite transaction with
 `taken_down_at`, `takedown_reason`, and `takedown.ok`. The media BLOB remains
-immutable evidence; the public media route denies it immediately because the
-canonical visibility predicate no longer matches. If the CAS affects zero rows,
+immutable evidence; #54 proves that the anonymous media route denies it
+immediately after the canonical visibility predicate stops matching. If the
+CAS affects zero rows,
 roll back, re-load, and return the winner's state/409 without deleting media.
 Any later evidence-retention purge is an idempotent #10 cleanup job. Production
 cache purge or provider-side deletion is a release-readiness concern owned by
@@ -171,24 +173,24 @@ small ISO-BMFF files.)
 
 | Case | Expect |
 |---|---|
-| approve pending video | published; media route/adapter can read the immutable BLOB; counters `publications` +1; audit `publish.ok` |
+| approve pending video | published; adapter can read the same immutable BLOB; counters `publications` +1; audit `publish.ok` |
 | re-approve published (retry) | idempotent success; **no** second counter increment; no duplicate media side effects |
 | approve rejected / takedown pending (illegal transitions, full matrix) | 409, state unchanged — table-driven over all from→to pairs vs `ALLOWED` |
 | concurrent double-approve (barrier immediately before status CAS, distinct reviewers) | one publishes; the CAS loser reloads `published` and returns 200 idempotent success; exactly one approved review row, one `publish.ok`, and `publications` counter +1; the BLOB remains present/readable |
-| concurrent approve + reject from pending (barrier immediately before status CAS) | exactly one legal transition/audit/review effect; if published, original BLOB is publicly readable; if rejected, public route denies it and evidence remains |
-| concurrent double-takedown from published (barrier immediately before status CAS) | one logical takedown/audit effect; public route denies; original evidence BLOB remains |
-| approve commit followed by takedown load | both transitions succeed in order; final `taken_down`; publication counter +1; one publish and one takedown audit; BLOB retained but not publicly readable |
+| concurrent approve + reject from pending (barrier immediately before status CAS) | exactly one legal transition/audit/review effect; final status is `published` or `rejected`; original evidence BLOB remains adapter-readable |
+| concurrent double-takedown from published (barrier immediately before status CAS) | one logical takedown/audit effect; final status `taken_down`; original evidence BLOB remains |
+| approve commit followed by takedown load | both transitions succeed in order; final `taken_down`; publication counter +1; one publish and one takedown audit; BLOB retained |
 | `publication_enabled=false` | 503, stays pending |
 | global daily publications at cap | 429, stays pending |
 | frozen channel / disabled agent / revoked agent | 409, stays pending |
 | transaction failure | rollback: stays pending, counters/ledger unchanged, media BLOB intact, no `publish.ok`; separate post-rollback `publish.failed` attempt audit uses a safe reason |
 | missing/cross-intent/wrong-kind video BLOB | publish guard/schema rejects; no status/counter/ledger/audit success effect |
-| takedown published | public media route denies access; evidence BLOB remains retained; status `taken_down` |
+| takedown published | status `taken_down`; evidence BLOB remains retained; #54 owns immediate anonymous route denial |
 | reject | rejected; evidence BLOB retained until the 7-day cleanup policy |
 | status write choke point | grep test: `SET status` on videos appears only in `publication.ts` |
 | provenance | published DTO fields per §5 |
 
 ### 8. Acceptance mapping & PR evidence
 
-- "Pending/rejected never in public APIs/media routes" → #15 predicate + §7 assertions. "Approved creates exactly one logical public asset" → UNIQUE intent_id + immutable BLOB + idempotent publish test. "AI/provenance labels" → §5. "Transitions audited" → `publish.ok/rejected/failed`, `takedown.ok`. "Idempotent retry no duplicates" → re-approve test.
+- "Pending/rejected remain non-public states" → #15 predicate contract + §7 state assertions; #54 owns the anonymous route transition matrix. "Approved creates exactly one logical public asset" → UNIQUE intent_id + immutable BLOB + idempotent publish test. "AI/provenance labels" → §5. "Transitions audited" → `publish.ok/rejected/failed`, `takedown.ok`. "Idempotent retry no duplicates" → re-approve test.
 - PR evidence: transition-matrix test output, orphan-reconcile test output, security impact note ("public/private transition boundary").
