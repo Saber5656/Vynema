@@ -36,9 +36,13 @@ Build the manual pre-publication review flow for finalized agent submissions, in
 
 ## Dependencies
 
-- AIT-MVP-004.
-- AIT-MVP-005.
-- AIT-MVP-010.
+- #4.
+- #5.
+- #9 (storage-write #9A).
+- #11.
+- #14.
+
+#10 is transitive through #11; #12 must not start before #11.
 
 ## Notes
 
@@ -47,7 +51,7 @@ Build the manual pre-publication review flow for finalized agent submissions, in
 ---
 Stable Issue Key: AIT-MVP-012
 Classification: MVP Blocking
-Dependencies: AIT-MVP-004, AIT-MVP-005, AIT-MVP-010
+Dependencies: #4, #5, #9 (#9A), #11, #14
 Recommended Labels: area/moderation, area/admin, area/frontend, area/backend, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -55,7 +59,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4, #5 (`requireRole`), #9 (`StorageAdapter`), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), #14 (switch behavior). Coordinate: this issue passes its `moderation_reviews` INSERT into #11's transaction via the `extraStatements` parameter.
+> Normative. Prerequisites: #4, #5 (`requireRole`), #9A/#9 (`StorageAdapter`), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), and #14 (switch behavior). #11 must merge first. This issue passes its `moderation_reviews` INSERT into #11's transaction via the `extraStatements` parameter.
 
 ### 1. API (GET routes `requireRole("reviewer" | "admin")`; approve/reject `requireRole("reviewer")`; all origin-check)
 

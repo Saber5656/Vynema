@@ -36,9 +36,10 @@ Implement the controlled state machine that turns finalized agent submissions in
 
 ## Dependencies
 
-- AIT-MVP-004.
-- AIT-MVP-010.
-- AIT-MVP-012.
+- #4.
+- #9 (storage-write #9A).
+- #10.
+- #14.
 
 ## Notes
 
@@ -47,7 +48,7 @@ Implement the controlled state machine that turns finalized agent submissions in
 ---
 Stable Issue Key: AIT-MVP-011
 Classification: MVP Blocking
-Dependencies: AIT-MVP-004, AIT-MVP-010, AIT-MVP-012
+Dependencies: #4, #9 (#9A), #10, #14
 Recommended Labels: area/publication, area/backend, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -55,7 +56,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4, #9 (SQLite BLOB `StorageAdapter`), #10 (videos exist in `pending_review`), #14 (publish quota/switch). Consumed by #12 and #13. Implements ADR-006.
+> Normative. Prerequisites: #4, #9A/#9 (`StorageAdapter` writes), #10 (videos exist in `pending_review`), and #14 (publish quota/switch). This issue precedes and is consumed by #12; #13 also consumes it. Implements ADR-006.
 
 ### 1. State machine (`apps/api/src/lib/publication.ts` — the ONLY module allowed to change `videos.status`)
 

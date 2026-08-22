@@ -1,4 +1,4 @@
-# Issue #22: Implement observability, audit logs, and operational runbooks
+# Issue #22 (#22A): Implement audit writer, action registry, and metadata redaction
 
 GitHub issue: https://github.com/Saber5656/Vynema/issues/22
 
@@ -10,45 +10,48 @@ file.
 
 ## Summary
 
-Add the minimum observability and runbook coverage needed to operate a free-tier-bounded MVP safely.
+Implement the shared audit core early so every feature emits typed,
+transaction-compatible, secret-safe audit records. Admin audit operations,
+observability documentation, runbooks, and ops status are the split child #55
+(#22B).
 
 ## Scope
 
-- Log request IDs, action type, actor type, status, safe error code, and quota outcome for mutating operations.
-- Add audit logs for agent registry changes, upload intents, finalize attempts, reviews, publication, reports, takedowns, quota freezes, and kill-switch changes.
-- Add admin-visible operational status for quotas and freezes.
-- Create runbooks for quota exhaustion, abuse report spike, object cleanup failure, revoked agent, deployment rollback, and emergency publication pause.
-- Define what is intentionally not logged.
+- Define the complete typed audit action registry used by feature Issues.
+- Implement `writeAudit` and transaction-compatible `auditStatement`.
+- Enforce metadata redaction and secret/capability rejection before persistence.
+- Define development retention posture and registry-completeness tests.
+- Give feature implementers one canonical audit contract before they add emitters.
 
 ## Out Of Scope
 
-- Paid observability platforms.
+- Admin audit API/UI, observability docs, runbooks, and ops-status additions (#55).
+- Paid observability platforms, production retention/provider choices, or deployment commands (#42).
 - Long-term analytics warehouse.
 
 ## Acceptance Criteria
 
-- [ ] Critical operations create safe audit records.
-- [ ] Operators can determine why upload or publication is paused.
-- [ ] Logs do not contain private keys, raw tokens, signatures, or sensitive upload capabilities.
-- [ ] Runbooks exist for launch-critical incidents.
-- [ ] Manual verification steps are included for each runbook.
-- [ ] Infra/security review confirms observability is sufficient for MVP operations.
+- [ ] Every active audit action is represented by the typed registry.
+- [ ] Feature mutations can include an audit statement in the same SQLite transaction.
+- [ ] Metadata validation rejects private keys, raw tokens, signatures, cookies, capabilities, URLs, and media BLOB identifiers.
+- [ ] Registry-completeness tests detect unregistered action literals.
+- [ ] Development retention posture is documented without selecting a production provider.
+- [ ] Backend/security review confirms the core is reusable and secret-safe.
 
 ## Dependencies
 
-- AIT-MVP-011.
-- AIT-MVP-013.
-- AIT-MVP-014.
-- AIT-MVP-019.
+- #4.
+- #19.
 
 ## Notes
 
-- Free-tier constraints may require lightweight logging and short retention.
+- [#55](https://github.com/Saber5656/Vynema/issues/55) owns #22B after #22A,
+  #18, #20, and the implemented feature audit emitters exist.
 
 ---
 Stable Issue Key: AIT-MVP-022
 Classification: MVP Blocking
-Dependencies: AIT-MVP-011, AIT-MVP-013, AIT-MVP-014, AIT-MVP-019
+Dependencies: #4, #19
 Recommended Labels: area/observability, area/ops, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -56,7 +59,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #19 (request logging exists), #4 (`audit_events`). Feature issues each emit their own audit events; THIS issue centralizes the writer, the action registry, the admin audit view, retention posture, and the runbooks.
+> Normative for #22A. Prerequisites: #4 (`audit_events`) and #19 (request logging conventions). #22A owns the writer, action registry, metadata redaction, and development retention posture. Feature Issues consume this core; #55 owns the later operations-facing surfaces.
 
 ### 1. Audit writer & action registry
 
@@ -65,18 +68,24 @@ Source Task: TSK-1260
 - **Metadata redaction (normative, enforced by test)**: `metadata` passes through `assertSafeMetadata()` which throws if any value matches: ≥32-char base64/hex blobs, `-----BEGIN`, strings containing signed-capability query material, keys named `token|secret|signature|cookie|url|blob` — plus an allowlist of expected keys per action is NOT required (too rigid), the deny-heuristic is. Unit tests feed an upload token, signature, capability URL, media BLOB/id, and PEM → all throw.
 - Retention: audit events are retained in the development SQLite database; production retention/capacity is selected in #42.
 
-### 2. Request logs (already emitted by #19) — operational posture
+### Split child: #55 / #22B admin audit, observability, and runbooks
+
+The following §§2–5 are canonical for
+[#55](https://github.com/Saber5656/Vynema/issues/55), not part of the #22A PR.
+They must use implemented routes/actions and #22A's redaction contract.
+
+#### 2. Request logs (already emitted by #19) — operational posture
 
 - Development emits structured JSON logs locally; durable events remain in SQLite. Production log provider/retention is deferred to #42.
 - `docs/observability.md` (new): the one-line-per-request JSON schema (#19 §3), local viewing, requestId correlation, and the **intentionally-not-logged list**: request/response bodies, media bytes/blob ids, cookies, upload tokens, signatures, capability URLs, comment/report free text, and email addresses. Any new log line must respect this list.
 
-### 3. Admin audit view
+#### 3. Admin audit view
 
 - API: `GET /api/admin/audit?cursor&limit&action&actorType&actorId&targetId&since&until` — admin only; keyset pagination on `(occurred_at, id)` DESC; filters map to the #4 indexes; response rows are the raw audit columns (metadata already safe by §1).
 - UI: `/admin/audit` `AuditLogPage`: filter bar (action dropdown from `AUDIT_ACTIONS`, actor type, target id, date range), table (time, action, actor, target, outcome, requestId, metadata expandable `<pre>` as text), Load more. Linked from `/admin` home (#18).
 - Test: admin-only 403s; filter correctness; a seeded `publish.ok` row round-trips.
 
-### 4. Runbooks (`docs/runbooks/`, one file each — every runbook has: Symptoms / Immediate checks (exact commands) / Actions (exact commands or UI paths) / Verification / Escalation)
+#### 4. Runbooks (`docs/runbooks/`, one file each — every runbook has: Symptoms / Immediate checks (exact commands) / Actions (exact commands or UI paths) / Verification / Escalation)
 
 | File | Key contents |
 |---|---|
@@ -89,15 +98,17 @@ Source Task: TSK-1260
 | `admin-bootstrap.md` | First-admin promotion SQL (#5 §6), adding reviewers, recovering a locked-out admin. |
 | `secret-rotation.md` | Development covers GitHub OAuth/client and session secrets only, plus bulk session invalidation (`DELETE FROM sessions`). Provider/deploy/media credentials do not exist before #42; #42 must add least-privilege rotation procedures after selection. Order: rotate → verify → revoke old → audit note. |
 
-### 5. Ops status visibility
+#### 5. Ops status visibility
 
-`/admin/quotas` (#18) already shows counters + switches. Add to it (this issue): last `cleanup.run` time + per-step counts (query latest audit row), and open-reports count (link to `/admin/reports`). Operators can answer "why is upload paused?" from `/admin/quotas` (switch state) + `/admin/audit` (`config.updated` rows show who/when/why — extend #14's `POST /api/admin/config` body with optional `reason: string ≤500` recorded in audit metadata; small additive change, coordinate with #14's implementer).
+`/admin/quotas` (#18) already shows counters + switches. Add to it in the #55 child issue: last `cleanup.run` time + per-step counts (query latest audit row), and open-reports count (link to `/admin/reports`). Operators can answer "why is upload paused?" from `/admin/quotas` (switch state) + `/admin/audit` (`config.updated` rows show who/when/why — extend #14's `POST /api/admin/config` body with optional `reason: string ≤500` recorded in audit metadata; small additive change, coordinate with #14's implementer).
 
 ### 6. Step-by-step order
 
-1. Action registry + `writeAudit`/`auditStatement` + redaction and registry-completeness tests (every action literal in active issue designs must exist); refactor any already-landed ad-hoc audit inserts to use it. 2. Admin audit API + page + tests. 3. `docs/observability.md`. 4. Manual development-cleanup trigger endpoint + test. 5. Runbooks (verify each current command locally while writing — record "verified <date>" per file; production commands wait for #42). 6. Quotas-page additions.
+#22A: 1. Action registry. 2. `writeAudit`/`auditStatement`. 3. Metadata-redaction and registry-completeness tests. 4. Refactor only already-landed ad-hoc inserts that are inside the #22A PR's approved scope.
+
+#55, after its dependencies: 1. Admin audit API/page and authorization tests. 2. `docs/observability.md`. 3. Manual development-cleanup trigger. 4. Runbooks verified against implemented commands with dates. 5. Quotas-page additions. Production commands remain blocked on #42.
 
 ### 7. Acceptance mapping & PR evidence
 
-- "Critical operations create safe audit records" → §1 registry covers every mutation in the system + redaction tests; "operators can determine why paused" → §5; "logs contain no secrets" → §1 heuristics + #19 redaction test + §2 list; "runbooks for launch-critical incidents" → §4 (emergency pause, quota, abuse, cleanup, revocation, rollback); "manual verification steps per runbook" → Verification sections.
-- PR evidence: redaction test output, audit page screenshot, runbook verification dates, security note ("observability — no new public surface; one admin-only development-cleanup trigger, audited").
+- #22A: typed registry/writer and secret-safe metadata → §1 tests; PR evidence is registry-completeness/redaction output plus a security impact note.
+- #55: operator diagnosis → child §5; transient-log posture → child §2; admin authorization → child §3; verified runbooks → child §4. PR evidence includes authorization tests, audit-page screenshots, runbook verification dates, and a security impact note.

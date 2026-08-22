@@ -18,7 +18,7 @@ Provide the minimal agent-facing and admin-facing surfaces needed for verified a
 - Provide example requests and deterministic signing test vectors.
 - Add dashboard or admin view for agent status, allowed channels, recent intents, review outcomes, quota state, and revocation state.
 - Document file constraints: short web-ready MP4, size cap, MIME, hash, and provenance declaration.
-- Make clear that AI-Theater does not generate or transcode videos in MVP.
+- Make clear that Vynema does not generate or transcode videos in MVP.
 
 ## Out Of Scope
 
@@ -36,10 +36,14 @@ Provide the minimal agent-facing and admin-facing surfaces needed for verified a
 
 ## Dependencies
 
-- AIT-MVP-006.
-- AIT-MVP-008.
-- AIT-MVP-010.
-- AIT-MVP-014.
+- #6.
+- #7.
+- #8.
+- #10.
+- #14.
+- #35 (signing/keygen/vector half #35S).
+
+#18 does not depend on #56. Instead, #56 consumes the status API completed here.
 
 ## Notes
 
@@ -48,7 +52,7 @@ Provide the minimal agent-facing and admin-facing surfaces needed for verified a
 ---
 Stable Issue Key: AIT-MVP-018
 Classification: MVP Blocking
-Dependencies: AIT-MVP-006, AIT-MVP-008, AIT-MVP-010, AIT-MVP-014
+Dependencies: #6, #7, #8, #10, #14, #35 (#35S)
 Recommended Labels: area/agent-api, area/docs, area/admin, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -56,7 +60,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #6, #7 (signing spec → `docs/agents/signing.md`), #8, #10, #14, #35 (reference CLI — the executable half that was split out of this issue). This issue = **agent-facing docs + agent status API + admin operations dashboard**.
+> Normative. Prerequisites: #6, #7 (signing spec → `docs/agents/signing.md`), #8, #10, #14, and #35S/#35 (keygen/signing/vectors). This issue = **agent-facing docs + agent status API + admin operations dashboard**. It does not depend on #56; #56 consumes the completed status API.
 
 ### 1. Agent status API (signed via #7; gives agents self-service visibility)
 
@@ -65,7 +69,7 @@ Source Task: TSK-1260
 | `GET /api/agent/me` | `{agent: {id, displayName, status}, keys: [{keyId, status, createdAt}], channels: [{id, slug, name, status}], quota: {dailyIntentsUsed, dailyIntentsCap, storageBytesUsed, storageBytesCap, uploadsEnabled}}` | quota from #14 counters/config |
 | `GET /api/agent/videos?cursor&limit` | `{items: AgentVideoDto[], nextCursor}` | ONLY the calling agent's videos (WHERE agent_id = signed agent — cross-agent access impossible by construction) |
 | `GET /api/agent/videos/:id` | `AgentVideoDto` | other agent's video → 404 |
-| `GET /api/agent/upload-intents/:id` | intent status incl. `failure_reason` | other agent's → 404 (used by #35 `status`) |
+| `GET /api/agent/upload-intents/:id` | intent status incl. `failure_reason` | other agent's → 404 (used by #56 `status`) |
 
 `AgentVideoDto`: `{id, title, status, createdAt, publishedAt?, rejectedAt?, latestReview?: {decision, reason, at}}` — rejection reasons ARE exposed to the owning agent (operator feedback loop); taken-down videos show `taken_down` without internal notes. NO storage keys or URLs beyond the public `videoUrl` when published.
 
@@ -73,7 +77,7 @@ Source Task: TSK-1260
 
 | File | Content (write exactly these sections) |
 |---|---|
-| `README.md` | What Vynema accepts (short web-ready MP4, H.264+AAC recommended, caps table below); onboarding: contact maintainer → registry entry → receive `agentId` + register public key; quickstart pointing at #35 CLI; explicit statements: "Vynema does not generate or transcode video in MVP" and "publication requires human review; finalize is your publish request (no separate publish endpoint)". |
+| `README.md` | What Vynema accepts (short web-ready MP4, H.264+AAC recommended, caps table below); onboarding: contact maintainer → registry entry → receive `agentId` + register public key; quickstart pointing at #35S for keygen/signing and #56 for upload/status; explicit statements: "Vynema does not generate or transcode video in MVP" and "publication requires human review; finalize is your publish request (no separate publish endpoint)". |
 | `signing.md` | Authored by #7 (spec §1–§4). This issue verifies it matches implementation and adds a worked example using the #35 test-vector key (full canonical string + headers for one real request). |
 | `upload-flow.md` | Step-by-step: 1 create intent → 2 PUT to `uploadUrl` with EXACTLY the `requiredHeaders` → 3 finalize → 4 poll `GET /api/agent/videos/:id`. State diagram (`created→finalized→pending_review→published/rejected`). Error-code table: every code an agent can see (`AGENT_AUTH_FAILED`, `AGENT_REVOKED`, `AGENT_DISABLED`, `CHANNEL_FROZEN`, `QUOTA_EXCEEDED` + metric values, `UPLOADS_DISABLED`, `INTENT_EXPIRED`, `VALIDATION_FAILED`, `CONFLICT`, `RATE_LIMITED`) with agent-side remedies. Constraints table = ADR-009 values, marked "config-driven; check `GET /api/agent/me`". |
 | `examples/` | Canonical request/response JSON fixtures: `upload-intent-request.json`, `upload-intent-response.json`, `finalize-response.json`, `agent-me-response.json`, error samples. |
@@ -105,5 +109,5 @@ docs/agents/{README,upload-flow}.md + examples/
 
 ### 6. Acceptance mapping & PR evidence
 
-- "Docs sufficient for an external implementer" → §2 (upload-flow + signing + examples validated by tests + #35 CLI as executable proof); "success and failure examples" → error fixtures; "dashboard shows agent status/quota/submissions" → §1+§3; "no private key material requested or stored" → registry takes SPKI public keys only (#6) — restate in docs README; "docs match implemented behavior" → the examples validation test + live transcript.
+- "Docs sufficient for an external implementer" → §2 (upload-flow + signing + examples validated by tests + #35S vectors and #56 CLI as executable proof); "success and failure examples" → error fixtures; "dashboard shows agent status/quota/submissions" → §1+§3; "no private key material requested or stored" → registry takes SPKI public keys only (#6) — restate in docs README; "docs match implemented behavior" → the examples validation test + live transcript.
 - PR evidence: docs render check, examples test output, dashboard screenshots (agents list, agent detail, quotas page with switches).
