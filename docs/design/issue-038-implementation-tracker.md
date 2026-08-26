@@ -30,7 +30,7 @@ push, and ready-PR publication wait for every hard predecessor to merge.
 |---|---|---|
 | S0 — Control | Read-only #1/#2/#3/#34/#36 disposition, #21/PR #52 ownership, and this planning sync | #53 planning PR merged; no implementation writer before this gate |
 | S1 — Foundation | #4, #19 feature-local shadow, #35 signing/keygen/vectors (#35S); optional #3 or #21 follow-up | #4 merged before #19 integration; #35S is independently publishable |
-| S2 — Shared foundations | #22 audit core (#22A); #5/#14 feature-local preparation; #9 storage-write (#9A) one-edge shadow; #46 after #4+#35S | #22A merges before #5/#14 audit integration, push, and ready PR; shared-surface token serializes integration; #9A integrates only after #4+#14+#19 |
+| S2 — Shared foundations | #22 audit core (#22A); #5 feature-local preparation; #14 quota-core preparation; #9 storage-write (#9A) one-edge shadow; #46 after #4+#35S | #22A merges before #5/#14 audit integration; #5 merges before #14 admin-route integration, push, and ready PR; shared-surface token serializes integration; #9A integrates only after #4+#14+#19 |
 | S3 — Identity/upload chain | #6→#7, #9A, #46/#21 sidecars, then #8→#10 | #8 waits for #6+#7+#14+#9A; #10 waits for #7+#8+#9A+#14 |
 | S4 — Publication/agent ops | #11 and #18 | #11 and #18 merged; #11 precedes #12 |
 | S5 — Reads/review/CLI | #15, #12, #56 upload/finalize/status CLI (#35U) | #56 waits for #8+#10+#18; shared integration for #15/#12 is serialized |
@@ -45,7 +45,8 @@ The aliases in parentheses identify the retained parent Issue numbers.
 
 ```text
 #4 + #19                         -> #22A (#22)
-#4 + #19 + #22A                 -> #5, #14 ready PR
+#4 + #19 + #22A                 -> #5 ready PR
+#4 + #19 + #22A + #5            -> #14 admin routes/push/ready PR
 #4 + #14 + #19                  -> #9A (#9)
 #4 + #19 + #5                   -> #6
 #6 + #35S (#35)                 -> #7 ready PR
@@ -146,8 +147,11 @@ also in progress and exclusively owns this file for the slice.
   private-key fixture and remains local-development-only.
 - #9A integrates only after #4, #14, and #19 merge. #54 starts only after #9A
   and #15 merge.
-- #5 and #14 can prepare feature-local code after #4+#19, but their audit
-  integration, push, and ready-PR publication wait for #22A. All later feature
+- #5's feature-local code and #14's quota core can prepare after #4+#19, but
+  their audit integration waits for #22A. #14 admin-route integration, push, and
+  ready-PR publication additionally wait for #5's canonical
+  `requireRole("admin")` and unauthorized/forbidden boundary tests; #14 must not
+  introduce a local auth stub or parallel role checker. All later feature
   emitters consume the same typed writer, action registry, and redaction
   contract. #20 can prepare feature-local tests, but its final gate waits for
   implemented product surfaces, #54, and #56. #55 can prepare feature-local

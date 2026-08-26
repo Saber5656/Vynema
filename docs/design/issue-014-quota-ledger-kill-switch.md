@@ -39,8 +39,9 @@ Implement free-tier budget enforcement so upload, publication, reads, and intera
 
 - AIT-MVP-002.
 - AIT-MVP-004.
+- AIT-MVP-005; admin-route integration, push, and ready-PR publication wait for its canonical `requireRole("admin")` contract and unauthorized/forbidden boundary tests, but quota-core preparation does not.
 - AIT-MVP-019; feature-local quota preparation starts only after AIT-MVP-004 and AIT-MVP-019.
-- AIT-MVP-022; audit-writer integration, push, and ready-PR publication wait for this gate, but feature-local preparation does not.
+- AIT-MVP-022; typed audit-writer integration, push, and ready-PR publication wait for this gate, but quota-core preparation does not.
 
 ## Notes
 
@@ -49,7 +50,7 @@ Implement free-tier budget enforcement so upload, publication, reads, and intera
 ---
 Stable Issue Key: AIT-MVP-014
 Classification: MVP Blocking
-Dependencies: AIT-MVP-002, AIT-MVP-004 + AIT-MVP-019 (feature-local preparation gate), AIT-MVP-022 (audit-integration/push/ready-PR gate)
+Dependencies: AIT-MVP-002, AIT-MVP-004 + AIT-MVP-019 (quota-core preparation gate), AIT-MVP-022 (audit-integration/push/ready-PR gate), AIT-MVP-005 (admin-route integration/push/ready-PR gate)
 Recommended Labels: area/quotas, area/infra, area/backend, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -57,7 +58,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. #4 (`platform_config`, `quota_ledger`, `quota_counters`) and #19 permit feature-local quota preparation. #22A/#22 (typed audit writer, action registry, metadata redaction) MUST merge before audit-emitting integration, push, and ready-PR publication. Implements ADR-009. Quota is a **security boundary** (threat model): every check fails closed.
+> Normative. #4 (`platform_config`, `quota_ledger`, `quota_counters`) and #19 permit feature-local quota-core preparation. #22A/#22 (typed audit writer, action registry, metadata redaction) MUST merge before audit-emitting integration. #5 MUST merge before admin-route integration and provide the canonical `requireRole("admin")` contract plus unauthorized/forbidden boundary tests. Push and ready-PR publication require both gates; neither #5 nor #22A is a quota-core preparation prerequisite. Implements ADR-009. Quota is a **security boundary** (threat model): every check fails closed.
 
 ### 1. Config keys & defaults
 
@@ -155,6 +156,15 @@ and no Cloudflare/R2-specific risk is accepted by this design.
 | `GET /api/admin/quotas` | admin | `getQuotaStatus`: `{switches: {...}, counters: [{scope, scopeId, metric, value, cap, periodStart}], updatedAt}` |
 | `POST /api/admin/config` | admin | body `{key, value}`; key MUST be in the 13-key allowlist; value validated by per-key zod type (boolean/int/string); writes `platform_config` and emits registered action `config.updated` (metadata: key, old, new) through #22A's typed writer in the same transaction. Direct audit-table insertion is forbidden. Unknown key → 422. |
 
+Quota services, counter/ledger helpers, and `QuotaStatusDto` may be prepared before
+#5. Route registration and request handling MUST wait for #5 and reuse its
+canonical `requireRole("admin")` middleware; a local auth stub, parallel role
+checker, or route-local admin test is forbidden. Boundary tests prove an
+unauthenticated request returns 401 and an authenticated non-admin request
+returns 403, with no config, counter, ledger, or audit mutation in either case.
+The authorized config-update case additionally proves that the config row and
+#22A `config.updated` event commit or roll back together.
+
 ### 6. Ledger lifecycle coverage (must reconcile)
 
 > Amended 2026-07-02: storage accounting is **reservation-at-intent** (closes the uncounted-storage gap between upload and finalize). The canonical table lives in #10 "Storage accounting"; summary:
@@ -183,8 +193,9 @@ all state; UTC-day rollover reconciles separately; double release and
 insufficient-gauge release affect zero rows and roll back; switches off →
 correct fail-closed policy result; #15 owns discovery HTTP 503 tests and #54
 owns media-route 503/no-store tests; `ConfigUnavailableError` → deny;
-§5 config update happy/unknown-key/bad-type + #22A typed-writer/redaction
-evidence for `config.updated`; §6 reconciliation.
+§5 unauthenticated 401 and non-admin 403 with no state/audit side effect via
+#5's canonical middleware; config update happy/unknown-key/bad-type + #22A
+typed-writer/redaction evidence for `config.updated`; §6 reconciliation.
 Production provider-spend tests are blocked on #42 and must not be marked
 passing in this issue.
 
@@ -199,9 +210,12 @@ apps/api/test/quota.test.ts
 
 1. Counter/ledger helpers + reconciliation test. 2. `checkIntentAllowed` +
 boundary tests. 3. §3 conditional transaction + race/fault-injection tests. 4.
-Switches, publish check, and feature-local admin endpoint preparation. 5. After
-#22A merges, integrate `config.updated` through its typed writer, run
-audit/redaction tests, then push and publish the ready PR. 6. Update
+Switches, publish check, and quota-status service preparation. 5. After #22A
+merges, integrate `config.updated` through its typed writer at the service
+transaction boundary and run audit/redaction tests without registering the
+admin routes. 6. After #5 merges, register both admin routes through its
+canonical `requireRole("admin")`, run the 401/403 no-side-effect tests, then push
+and publish the ready PR. 7. Update
 `docs/architecture/vynema-architecture.md` Free-Tier Control Points table to
 reference the config keys.
 
@@ -209,5 +223,6 @@ reference the config keys.
 
 - "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → fail-closed switch policy here, #15 discovery HTTP evidence, and #54 anonymous media-route evidence; "admins see quota state" → §5.
 - PR evidence: boundary test table output + reconciliation test output + #22A
-  typed-writer/redaction evidence for `config.updated` + security impact note
-  ("quota/cost boundary — fail-closed verified").
+  typed-writer/redaction evidence for `config.updated` + #5 canonical-admin
+  middleware evidence (401/403 with no state/audit side effect) + security
+  impact note ("quota/cost boundary — fail-closed verified").
