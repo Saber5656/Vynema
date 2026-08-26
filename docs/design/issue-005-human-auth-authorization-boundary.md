@@ -38,6 +38,8 @@ Implement human authentication and role-based authorization while enforcing the 
 
 - AIT-MVP-001.
 - AIT-MVP-004.
+- AIT-MVP-019; feature-local auth preparation starts only after AIT-MVP-004 and AIT-MVP-019.
+- AIT-MVP-022; audit-writer integration, push, and ready-PR publication wait for this gate, but feature-local preparation does not.
 
 ## Notes
 
@@ -46,7 +48,7 @@ Implement human authentication and role-based authorization while enforcing the 
 ---
 Stable Issue Key: AIT-MVP-005
 Classification: MVP Blocking
-Dependencies: AIT-MVP-001, AIT-MVP-004
+Dependencies: AIT-MVP-001, AIT-MVP-004 + AIT-MVP-019 (feature-local preparation gate), AIT-MVP-022 (audit-integration/push/ready-PR gate)
 Recommended Labels: area/auth, area/security, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -54,7 +56,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4 (users/sessions tables), #19 (errors, origin-check, rate limiter). Implements ADR-004 (GitHub OAuth + local SQLite sessions, no Clerk).
+> Normative. #4 (users/sessions tables) and #19 (errors, origin-check, rate limiter) permit feature-local auth preparation. #22A/#22 (typed audit writer, action registry, metadata redaction) MUST merge before audit-emitting integration, push, and ready-PR publication. Implements ADR-004 (GitHub OAuth + local SQLite sessions, no Clerk).
 
 ### 1. Endpoints
 
@@ -124,7 +126,10 @@ The FIRST admin is promoted manually with the documented local SQLite admin comm
 
 ### 7. Audit events
 
-`auth.login_success`, `auth.login_denied` (banned / state mismatch), `auth.logout` — actor_type `human`, no tokens in metadata.
+`auth.login_success`, `auth.login_denied` (banned / state mismatch), and
+`auth.logout` use #22A's typed writer and registered action schemas with
+`actor_type=human`; metadata contains no tokens. #5 MUST NOT insert directly
+into the audit table or define a competing writer/redaction path.
 
 ### 8. Step-by-step order
 
@@ -133,8 +138,13 @@ The FIRST admin is promoted manually with the documented local SQLite admin comm
 3. Logout + origin-check test.
 4. requireRole + §4 boundary tests.
 5. Web: `useMe`, header sign-in button (links to `/api/auth/login?next=<current>`), user menu with sign-out.
+6. After #22A merges, integrate the three registered `auth.*` events through
+   its typed writer, run audit/redaction tests, then push and publish the ready
+   PR.
 
 ### 9. Acceptance mapping & PR evidence
 
-- "Humans can sign in" → §1; "reviewer/admin roles" → §3; "no human role can create upload capability / publish" → §4 tests (cite in PR as boundary evidence); "unauthorized/forbidden consistent and audited" → #19 envelope + §7.
-- PR must include: security impact note (touches human auth boundary), §4 test output, confirmation no secrets committed (`.dev.vars` only).
+- "Humans can sign in" → §1; "reviewer/admin roles" → §3; "no human role can create upload capability / publish" → §4 tests (cite in PR as boundary evidence); "unauthorized/forbidden consistent and audited" → #19 envelope + #22A-backed §7 events.
+- PR must include: security impact note (touches human auth boundary), §4 test
+  output, #22A typed-writer/redaction test output for every `auth.*` event, and
+  confirmation no secrets were committed (`.dev.vars` only).

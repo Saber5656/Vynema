@@ -30,7 +30,7 @@ push, and ready-PR publication wait for every hard predecessor to merge.
 |---|---|---|
 | S0 — Control | Read-only #1/#2/#3/#34/#36 disposition, #21/PR #52 ownership, and this planning sync | #53 planning PR merged; no implementation writer before this gate |
 | S1 — Foundation | #4, #19 feature-local shadow, #35 signing/keygen/vectors (#35S); optional #3 or #21 follow-up | #4 merged before #19 integration; #35S is independently publishable |
-| S2 — Shared foundations | #5, #14, #22 audit core (#22A); #9 storage-write (#9A) one-edge shadow; #46 after #4+#35S | Shared-surface token serializes #5/#14/#22A; #9A integrates only after #4+#14+#19 |
+| S2 — Shared foundations | #22 audit core (#22A); #5/#14 feature-local preparation; #9 storage-write (#9A) one-edge shadow; #46 after #4+#35S | #22A merges before #5/#14 audit integration, push, and ready PR; shared-surface token serializes integration; #9A integrates only after #4+#14+#19 |
 | S3 — Identity/upload chain | #6→#7, #9A, #46/#21 sidecars, then #8→#10 | #8 waits for #6+#7+#14+#9A; #10 waits for #7+#8+#9A+#14 |
 | S4 — Publication/agent ops | #11 and #18 | #11 and #18 merged; #11 precedes #12 |
 | S5 — Reads/review/CLI | #15, #12, #56 upload/finalize/status CLI (#35U) | #56 waits for #8+#10+#18; shared integration for #15/#12 is serialized |
@@ -44,7 +44,8 @@ push, and ready-PR publication wait for every hard predecessor to merge.
 The aliases in parentheses identify the retained parent Issue numbers.
 
 ```text
-#4 + #19                         -> #5, #14, #22A (#22)
+#4 + #19                         -> #22A (#22)
+#4 + #19 + #22A                 -> #5, #14 ready PR
 #4 + #14 + #19                  -> #9A (#9)
 #4 + #19 + #5                   -> #6
 #6 + #35S (#35)                 -> #7 ready PR
@@ -76,12 +77,12 @@ contract is fixed, but its vector-consumption integration and ready PR require
 - [ ] #34 Application skeleton accepted
 - [ ] #4 local SQLite schema & migrations
 - [ ] #19 API platform (errors / request IDs / rate limits / CORS)
+- [ ] #22 Audit writer, action registry, and metadata redaction (#22A)
 - [ ] #5 Human auth & no-human-upload boundary
 - [ ] #6 Agent registry & keys
 - [ ] #14 Quota ledger & kill switches
 - [ ] #35 Keygen, signing, and deterministic vectors (#35S)
 - [ ] #7 Signed agent requests & replay protection
-- [ ] #22 Audit writer, action registry, and metadata redaction (#22A)
 - [ ] #9 Development `StorageAdapter`, SQLite BLOB writes, and one-time capabilities (#9A)
 - [ ] #8 Upload-intent API
 - [ ] #10 Finalize & callable development cleanup
@@ -145,10 +146,13 @@ also in progress and exclusively owns this file for the slice.
   private-key fixture and remains local-development-only.
 - #9A integrates only after #4, #14, and #19 merge. #54 starts only after #9A
   and #15 merge.
-- #22A lands before feature emitters. #20 can prepare feature-local tests, but
-  its final gate waits for implemented product surfaces, #54, and #56. #55 can
-  prepare feature-local docs, but its final gate waits for #22A, #18, #20
-  final, #54, and implemented feature audit emitters.
+- #5 and #14 can prepare feature-local code after #4+#19, but their audit
+  integration, push, and ready-PR publication wait for #22A. All later feature
+  emitters consume the same typed writer, action registry, and redaction
+  contract. #20 can prepare feature-local tests, but its final gate waits for
+  implemented product surfaces, #54, and #56. #55 can prepare feature-local
+  docs, but its final gate waits for #22A, #18, #20 final, #54, and implemented
+  feature audit emitters.
 - #35S owns keygen/signing/vectors. #56 owns upload/finalize/status and starts
   only after #8, #10, and #18 merge.
 - #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented;
@@ -168,7 +172,7 @@ also in progress and exclusively owns this file for the slice.
 | Video status transitions (single writer) | #11 §1 | #12, #13 |
 | Development media write/capability contract | #9A/#9 | #8, #10, #11, #12 preview, #54 |
 | Development public media-read boundary | #9B/#54 + #15 predicate | #13, #16 integration/ready PR, #20 final, #55 runbooks |
-| Audit action registry and metadata redaction | #22A/#22 | all feature emitters, #55 |
+| Audit action registry and metadata redaction | #22A/#22 | #5, #14, all later feature emitters, #55 |
 | Whole-product E2E and boundary evidence | #20 | #55, #23, #24, #42 |
 | Admin audit/runbook evidence | #22B/#55 | #23, #24, #42 |
 | Report/moderation enums | #36 = #4 DDL | #13, #37 |
