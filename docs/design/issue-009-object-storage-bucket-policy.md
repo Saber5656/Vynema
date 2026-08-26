@@ -21,7 +21,8 @@ one-time upload capabilities. Public media reads are the split child #54
 - Define intent/kind-scoped, short-lived, one-time upload capabilities and immutable media ids.
 - Implement the same-origin capability PUT boundary without a CORS grant.
 - Bound temporary bytes, hashing work, deadlines, and capability reuse.
-- Implement ownership-checked cleanup and document the private BLOB lifecycle.
+- Implement intent/kind-scoped adapter deletion and failed-upload temporary-file
+  cleanup. #10 owns reservation-releasing lifecycle cleanup.
 
 ## Out Of Scope
 
@@ -35,7 +36,10 @@ one-time upload capabilities. Public media reads are the split child #54
 - [ ] Capability claim, byte/deadline bounds, digest/MIME checks, and completion fail closed.
 - [ ] Committed BLOBs are immutable and ownership-bound to one intent and media kind.
 - [ ] Routes never accept a caller-selected BLOB id.
-- [ ] Cleanup is idempotent and cannot leave reservation-free bytes or a reusable consumed capability.
+- [ ] Failed or interrupted PUTs remove private temporary files,
+      ownership-scoped adapter deletion cannot cross intent/kind, and a claimed
+      capability cannot become reusable. #10 owns reservation release and
+      lifecycle-cleanup idempotency.
 - [ ] Data/security review confirms storage ownership, same-origin restrictions, and secret-safe evidence.
 
 ## Dependencies
@@ -93,8 +97,10 @@ cross-provider atomicity; #42 must instead design staging, idempotency,
 reconciliation, and cleanup that preserve the same logical invariant.
 All development deletes run inside `withTransaction` and receive that same
 repository/adapter SQLite transaction. `deleteOwned` includes intent and kind in
-its predicate and the caller checks its affected-row result, so reference
-clearing, owned-BLOB deletion, counters/ledger, and audit commit atomically.
+its predicate and returns whether that exact owned row was deleted; it does not
+clear references or update counters, ledger rows, or audit events. #10 owns the
+callable cleanup job that composes reference clearing, this deletion primitive,
+reservation release, ledger updates, and audit in one lifecycle transaction.
 
 ### 2. SQLite BLOB implementation
 
@@ -127,8 +133,9 @@ clearing, owned-BLOB deletion, counters/ledger, and audit commit atomically.
 - The PUT route compares token hashes in constant time, rejects expired,
   claimed, or used tokens, and obtains expected metadata only from the persisted
   capability/intent. It claims before reading, then atomically marks completion
-  with the verified BLOB commit. A claimed-but-incomplete token is terminal and
-  cleanup releases its intent reservation; ambiguous clients query state.
+  with the verified BLOB commit. A claimed-but-incomplete token is terminal;
+  #10's callable cleanup job owns the later intent transition and reservation
+  release. Ambiguous clients query state.
 - Raw tokens, BLOB ids, media bytes, and non-public identifiers are never logged.
 
 ### Split child: #54 / #9B public media-read boundary
@@ -152,8 +159,9 @@ They consume #9A's adapter/write contract and #15's visibility predicate.
 ### 5. Split policy evidence (`docs/security/storage-policy.md`)
 
 #9A records capability scope/expiry/reuse rejection, no raw token in DB/logs,
-digest/MIME mismatch cleanup, claim-CAS races, byte/deadline bounds, ambiguous
-retry, and ownership-checked orphan cleanup.
+digest/MIME mismatch temporary-file cleanup, claim-CAS races, byte/deadline
+bounds, ambiguous retry, and intent/kind-scoped adapter deletion. #10 records
+reservation-releasing lifecycle and orphan-cleanup evidence.
 
 #54 records private-before-public, published/range reads, pending/failed/
 rejected/taken-down/disabled/revoked/frozen denials, the public-read kill
@@ -162,12 +170,13 @@ public DTOs. The shared policy document must identify which Issue/PR produced
 each row.
 
 #9A tests prove capability scope/expiry/reuse rejection; no raw token in
-DB/logs; mismatch leaves no BLOB; orphan cleanup is idempotent; fault injection
+DB/logs; mismatch, timeout, and disconnect remove the private temporary file and
+leave no BLOB; `deleteOwned` cannot delete another intent/kind; fault injection
 between BLOB insert and `used_at`; claim-CAS concurrency; size+1/timeout/
 disconnect; and ambiguous retry. No outcome may leave committed bytes with a
-reusable token or a completed token without recoverable bytes. A barrier after
-streaming but before the completion guard races expiry cleanup in both orders;
-no reservation-free BLOB may remain.
+reusable token or a completed token without recoverable bytes. #10 owns the
+barrier race against expiry cleanup and the reservation/byte accounting
+invariant in both winner orders.
 
 #54 tests prove pending/failed/rejected/taken-down/disabled/revoked/frozen media
 routes deny access; published video/thumbnail and bounded Range reads succeed;
@@ -179,7 +188,8 @@ anonymous routes.
 ### 6. Step-by-step order
 
 #9A: 1. Adapter interface. 2. SQLite BLOB implementation. 3. One-time
-capability PUT route. 4. ownership-checked cleanup and #9A policy evidence.
+capability PUT route. 4. intent/kind-scoped deletion, failed-upload temporary
+cleanup, and #9A policy evidence.
 #54 then adds visibility-checked media routes and #9B policy evidence after
 #9A and #15 merge. Keep all production provisioning blocked on #42.
 
@@ -189,5 +199,5 @@ capability PUT route. 4. ownership-checked cleanup and #9A policy evidence.
 - #54 private-before-public/read/takedown behavior → child §4 plus #9B evidence in §5.
 - Provider independence → no cloud credential/config requirement and adapter-only BLOB access.
 - Release migration → #42 must test staging/reconciliation and may not claim cross-provider atomicity.
-- #9A PR evidence: adapter/capability/cleanup tests, secret scan, and security impact note.
+- #9A PR evidence: adapter/capability, temporary-file cleanup, and scoped-deletion tests; secret scan; and security impact note.
 - #54 PR evidence: media-route/visibility transition tests, policy evidence, and security impact note.
