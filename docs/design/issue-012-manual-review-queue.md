@@ -68,7 +68,7 @@ Source Task: TSK-1260
 | `GET /api/moderation/queue?cursor&limit` | — | 200 `{items: QueueItemDto[], nextCursor}` | videos `status='pending_review'`, oldest first (`created_at ASC, id ASC` — FIFO fairness), uses `idx_videos_review_queue` |
 | `GET /api/moderation/videos/:id` | — | 200 QueueItemDetailDto | any status (reviewers may inspect history) |
 | `GET /api/moderation/videos/:id/preview` | — | 200 media stream | ONLY for `pending_review` videos → else 409 `CONFLICT`. Reviewer/admin-only same-origin response resolved through `StorageAdapter`; never returns a BLOB id or transferable URL. Audit `moderation.preview_issued` (actor, videoId). |
-| `POST /api/moderation/videos/:id/approve` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]` |
+| `POST /api/moderation/videos/:id/approve` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]`; #11 executes the INSERT before its status CAS in the same transaction |
 | `POST /api/moderation/videos/:id/reject` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `rejectVideo` with the review INSERT |
 
 Approve/reject handlers trim `reason` before validation, before calling

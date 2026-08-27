@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import type { DatabaseSync as NodeDatabaseSync } from "node:sqlite";
@@ -32,4 +32,45 @@ export function openDatabase(path: string): Database {
     database.close();
     throw error;
   }
+}
+
+type IntegrityCheckPragma = {
+  integrity_check: string;
+};
+
+export function assertDatabaseIntegrity(database: Database): void {
+  const result = database.prepare("PRAGMA integrity_check(1)").get() as
+    IntegrityCheckPragma | undefined;
+
+  if (result?.integrity_check !== "ok") {
+    throw new Error("SQLite integrity check failed.");
+  }
+}
+
+export function backupDatabase(database: Database, destinationPath: string): Promise<void> {
+  mkdirSync(dirname(destinationPath), { recursive: true });
+
+  if (existsSync(destinationPath)) {
+    throw new Error(`Backup destination already exists: ${destinationPath}`);
+  }
+
+  try {
+    // VACUUM INTO is available in the SQLite bundled with every supported
+    // Node 22 runtime. Unlike node:sqlite backup(), it does not require
+    // Node 22.16+, and it still creates a transactionally consistent copy.
+    database.prepare("VACUUM INTO ?").run(destinationPath);
+
+    const backupCopy = openDatabase(destinationPath);
+
+    try {
+      assertDatabaseIntegrity(backupCopy);
+    } finally {
+      backupCopy.close();
+    }
+  } catch (error) {
+    rmSync(destinationPath, { force: true });
+    throw error;
+  }
+
+  return Promise.resolve();
 }

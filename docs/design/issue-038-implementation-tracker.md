@@ -92,7 +92,7 @@ contract is fixed, but its vector-consumption integration and ready PR require
 
 - [x] #2 ADRs approved & committed
 - [x] #34 Application skeleton accepted
-- [ ] #4 local SQLite schema & migrations
+- [x] #4 local SQLite schema & migrations (accepted by its delivery PR; closes on merge)
 - [ ] #19 API platform (errors / request IDs / rate limits / CORS)
 - [ ] #22 Audit writer, action registry, and metadata redaction (#22A)
 - [ ] #5 Human auth & no-human-upload boundary
@@ -137,6 +137,7 @@ stay unchecked.
 | #1 | The requirements baseline and PR #60's repository-relative ADR-index link are on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #2 | PR #41 contains the reviewed ADR baseline | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | PR #60 and PR #59 prerequisites are satisfied; this close-out PR itself must merge | Accepted by this close-out; checked on merge |
+| #4 | This delivery adds the canonical local SQLite migrations, repository/config primitives, schema tests, and backup/restore/fix-forward commands | This delivery PR itself must pass review and merge; production migration remains blocked on #42 | Accepted by this delivery; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #36 | PR #43 contains the public policy documents | Owner and counsel approval, plus #13 runtime moderation evidence, are still missing | Open; unchecked |
@@ -149,7 +150,7 @@ than historical local branch names.
 
 | Lane | Current state | Publication gate |
 |---|---|---|
-| #4 local SQLite schema | Open implementation issue | Ready PR requires implementation, tests, and required role reviews |
+| #4 local SQLite schema | Implemented and validated by its delivery PR | PR merge closes #4; production provider migration remains blocked on #42 |
 | #19 API platform | Open implementation issue | Shared-surface integration still follows the dependency gates above |
 | #21 checks-only CI | PR #58 merged; Issue closed | Deployment remains blocked on #42 |
 | #38 tracker sync | Updated by the Issue #3 close-out PR | This status synchronization does not claim completion of the remaining implementation waves |
