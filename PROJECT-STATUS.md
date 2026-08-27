@@ -61,8 +61,9 @@ Historical context is preserved without participating in active implementation:
 | Current product requirements | `docs/requirements/vynema-mvp-requirements.md`; active implementation contract. |
 | Current architecture and issue contracts | `docs/architecture/`, `docs/design/`, and the issue #38 implementation tracker; active implementation baselines. |
 
-No archived v1 file is made normative by this status page, and no historical
-artifact is deleted as part of the v2 workflow cleanup.
+No archived v1 file is made normative or deleted by this close-out. Earlier
+AI-DLC workflow artifacts were removed from the active tree by commit `06d4236`
+and remain recoverable in Git history.
 
 ## Next Actions
 
