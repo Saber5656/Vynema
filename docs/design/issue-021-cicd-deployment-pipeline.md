@@ -64,9 +64,9 @@ Source Task: TSK-1260
 
 - Triggers: `pull_request` (all branches), `push` to `main`. NEVER `pull_request_target`.
 - Top level: `permissions: { contents: read }`; `concurrency: { group: ci-${{ github.ref }}, cancel-in-progress: true }`.
-- Single job `checks` on `ubuntu-latest` (GitHub-hosted ONLY): checkout → pnpm setup → node 22 with pnpm cache → `pnpm install --frozen-lockfile` → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build`. Add `pnpm test:coverage` artifact upload once #20 lands.
+- Single job `checks` on `ubuntu-latest` (GitHub-hosted ONLY): checkout with credentials persistence disabled → Node 22 → Corepack activation of the exact `package.json#packageManager` value → declaration/runtime version assertions → `pnpm install --frozen-lockfile` → shared-package build → `pnpm lint` → `pnpm typecheck` → `pnpm test` → `pnpm build`. Do not configure pnpm caching before pnpm is active. Add `pnpm test:coverage` artifact upload once #20 lands.
 - Job `e2e` (added when #20 lands): same setup + `npx playwright install --with-deps chromium` + `pnpm test:e2e`; artifacts: playwright report on failure.
-- **Action pinning rule (normative)**: every third-party action pinned to a full 40-char commit SHA with a trailing version comment. Resolve SHAs at implementation time: `gh api repos/<owner>/<repo>/git/ref/tags/<vX.Y.Z> --jq .object.sha` (dereference annotated tags via `git/tags/<sha>` if type=tag). Actions used: `actions/checkout`, `pnpm/action-setup`, `actions/setup-node`, `actions/upload-artifact`. Dependabot (already configured) keeps them updated.
+- **Action pinning rule (normative)**: every action is pinned to a full 40-character commit SHA with a trailing version comment. Resolve SHAs at implementation time: `gh api repos/<owner>/<repo>/git/ref/tags/<vX.Y.Z> --jq .object.sha` (dereference annotated tags via `git/tags/<sha>` if type=tag). The current checks job uses only GitHub-owned `actions/checkout` and `actions/setup-node`; repository allowed-actions policy forbids `pnpm/action-setup`, so pnpm is enabled through the Node-bundled Corepack CLI and checked against the exact repository declaration. `actions/upload-artifact` may be introduced with a reviewed full-SHA pin only when #20 adds the corresponding artifact-producing check. Dependabot (already configured) keeps action pins updated.
 
 #### Deployment workflow
 
@@ -96,11 +96,11 @@ Branch protection may require `checks`, `high-confidence-secret-scan`, and later
 
 ### 4. Tests / verification
 
-- CI proves itself: open a scratch PR with a failing test → CI red; fix → green. Record run links in this issue.
+- CI proves the corrective path with the historical zero-job startup failures plus a successful same-head ready-PR run after removing the rejected action. A deliberate scratch failure is optional and requires separate approval; do not manufacture a failing default-branch or production-affecting run.
 - Verify no deploy workflow or provider secret exists. Provider deployment tests are `N/A — blocked on #42`.
 - Workflow-lint step: add `zizmor` or manual checklist? MVP: manual checklist in PR description = the security-contract §Repository Automation bullets, each checked with a line of evidence (grep output: `grep -rn "pull_request_target\|self-hosted\|id-token" .github/workflows/` → empty).
 
 ### 5. Acceptance mapping & PR evidence
 
 - "CI blocks merge on failing steps" → §1 ci.yml + branch protection note; "test suite runs in CI once #20 lands" → e2e job clause; deployment/provider requirements remain unchecked and explicitly delegated to #42; "no automatic paid spend" → no deploy workflow or provider secret.
-- PR evidence: security impact note ("repository automation — least-privilege reviewed"), the grep outputs above, CI run links (red→green demo), pinned-SHA table (action → SHA → version).
+- PR evidence: security impact note ("repository automation — least-privilege reviewed"), the grep outputs above, historical startup-failure and corrected same-head success links, exact package-manager declaration/runtime assertions, and a pinned-SHA table (action → SHA → version).

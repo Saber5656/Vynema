@@ -20,22 +20,27 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10; bootstrap pnpm 11.19.0
-        with:
-          version: 10.34.5
-          run_install: false
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.1
-          cache: pnpm
-          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Enable repository-pinned pnpm
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          readonly expected_package_manager="pnpm@10.34.5"
+          readonly declared_package_manager="$(node -p "require('./package.json').packageManager")"
+
+          test "${declared_package_manager}" = "${expected_package_manager}"
+          corepack enable
+          corepack prepare "${expected_package_manager}" --activate
+          test "$(pnpm --version)" = "10.34.5"
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile

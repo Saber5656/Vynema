@@ -26,9 +26,11 @@ stay aligned.
 ## Checks-only CI
 
 `.github/workflows/ci.yml` runs on pull requests and pushes to `main`. Its
-single `checks` job uses a GitHub-hosted runner and executes the local commands
-above. Third-party actions are pinned to full commit SHAs and the workflow has
-only `contents: read` permission.
+single `checks` job uses a GitHub-hosted runner, sets up Node before enabling
+the exact `pnpm@10.34.5` declared by the repository, and executes the local
+commands above. GitHub-owned actions are pinned to reviewed full commit SHAs;
+checkout does not persist credentials, and the workflow has only
+`contents: read` permission. No third-party package-manager action is needed.
 
 The existing `.github/workflows/secret-scan.yml` supplies the separate
 `high-confidence-secret-scan` check for pull requests. It also uses
