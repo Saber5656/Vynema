@@ -4,8 +4,8 @@ GitHub issue: https://github.com/Saber5656/Vynema/issues/38
 
 This file is the canonical MVP implementation tracker. Edit here; the GitHub
 issue body only carries a short summary and a link back to this file. See
-also `docs/design/README.md` for the directory index of every issue's design
-file.
+also `docs/design/README.md` for the directory index of repository-local issue
+designs; the entries without design files are documented below.
 
 ---
 
