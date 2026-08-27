@@ -8,6 +8,7 @@ import {
   applyMigrationsWithBackup,
   createTimestampedBackup,
   getMigrationStatus,
+  getSearchIndexMode,
 } from "../lib/migrations.js";
 
 const repositoryRoot = fileURLToPath(new URL("../../../../../", import.meta.url));
@@ -81,6 +82,9 @@ function inspect(): void {
       databasePath,
       currentVersion: migrationStatus.currentVersion,
       tables: tables.map((table) => table.name),
+      searchIndexMode: tables.some((table) => table.name === "videos_fts")
+        ? getSearchIndexMode(database)
+        : null,
       platformConfig: config,
     });
   } finally {

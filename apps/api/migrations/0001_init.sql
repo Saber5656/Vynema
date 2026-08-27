@@ -288,7 +288,10 @@ BEFORE UPDATE OF intent_id, agent_id, channel_id, video_blob_id, thumbnail_blob_
   ) THEN RAISE(ABORT, 'invalid thumbnail blob reference') END;
 END;
 
--- Full-text search (external content FTS5; local SQLite)
+-- Full-text search. The migration runner selects this FTS5 block when the
+-- bundled SQLite exposes FTS5 and installs a synchronized portable table when
+-- the supported Node 22.13 Linux build does not.
+-- vynema:fts5:start
 CREATE VIRTUAL TABLE videos_fts USING fts5(
   title, description,
   content='videos', content_rowid='rowid'
@@ -303,6 +306,7 @@ CREATE TRIGGER videos_fts_au AFTER UPDATE OF title, description ON videos BEGIN
   INSERT INTO videos_fts(videos_fts, rowid, title, description) VALUES ('delete', old.rowid, old.title, old.description);
   INSERT INTO videos_fts(rowid, title, description) VALUES (new.rowid, new.title, new.description);
 END;
+-- vynema:fts5:end
 
 CREATE TABLE comments (
   id TEXT PRIMARY KEY,

@@ -138,6 +138,26 @@ describe("applyMigrations", () => {
     ).toBeUndefined();
   });
 
+  it("rejects malformed FTS5 capability markers without partial schema changes", () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_invalid_marker.sql"),
+      "CREATE TABLE marker_probe (id INTEGER); -- vynema:fts5:start\nCREATE TABLE unfinished (id INTEGER); -- recovery: restore backup",
+    );
+
+    expect(() =>
+      applyMigrations(fixture.database, fixture.migrationsDirectory, { fts5: false }),
+    ).toThrow("Migration 0001_invalid_marker.sql failed.");
+    expect(fixture.database.prepare("PRAGMA user_version").get()).toEqual({
+      user_version: 0,
+    });
+    expect(
+      fixture.database
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = 'marker_probe'")
+        .get(),
+    ).toBeUndefined();
+  });
+
   it("rejects gaps and database versions not represented by repository migrations", () => {
     const fixture = createFixture();
     writeFileSync(

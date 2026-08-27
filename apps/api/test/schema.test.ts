@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase, type Database } from "../src/lib/database.js";
-import { applyMigrations } from "../src/lib/migrations.js";
+import { applyMigrations, getSearchIndexMode } from "../src/lib/migrations.js";
 import { ConfigUnavailableError, getConfig } from "../src/lib/repo/config.js";
 import { all, newId, nowMs, one, transaction } from "../src/lib/repo/db.js";
 
@@ -178,6 +178,18 @@ function insertPendingVideo(
       2_000,
       2_000,
     );
+}
+
+function findSearchRows(target: Database, token: string): unknown[] {
+  if (getSearchIndexMode(target) === "fts5") {
+    return target.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?").all(token);
+  }
+
+  return target
+    .prepare(
+      "SELECT rowid FROM videos_fts WHERE instr(lower(title), lower(?)) > 0 OR instr(lower(description), lower(?)) > 0",
+    )
+    .all(token, token);
 }
 
 beforeEach(() => {
@@ -889,7 +901,7 @@ describe("canonical schema", () => {
     ).toBeUndefined();
   });
 
-  it("enforces uniqueness and keeps the FTS external-content index synchronized", () => {
+  it("enforces uniqueness and keeps the selected search index synchronized", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111");
     insertPendingVideo(
@@ -934,27 +946,54 @@ describe("canonical schema", () => {
         ),
     ).toThrow();
 
-    expect(
-      database.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH 'titletoken'").all(),
-    ).toHaveLength(1);
+    expect(findSearchRows(database, "titletoken")).toHaveLength(1);
     database
       .prepare("UPDATE videos SET title = ? WHERE id = ?")
       .run("Replacement newtoken", "vid_11111111-1111-4111-8111-111111111111");
-    expect(
-      database.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH 'titletoken'").all(),
-    ).toHaveLength(0);
-    expect(
-      database.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH 'newtoken'").all(),
-    ).toHaveLength(1);
+    expect(findSearchRows(database, "titletoken")).toHaveLength(0);
+    expect(findSearchRows(database, "newtoken")).toHaveLength(1);
     database
       .prepare("DELETE FROM likes WHERE video_id = ?")
       .run("vid_11111111-1111-4111-8111-111111111111");
     database
       .prepare("DELETE FROM videos WHERE id = ?")
       .run("vid_11111111-1111-4111-8111-111111111111");
-    expect(
-      database.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH 'newtoken'").all(),
-    ).toHaveLength(0);
+    expect(findSearchRows(database, "newtoken")).toHaveLength(0);
+  });
+
+  it("installs and synchronizes the portable search mode without FTS5", () => {
+    const fallbackDirectory = mkdtempSync(join(tmpdir(), "vynema-schema-portable-search-"));
+    const fallbackDatabase = openDatabase(join(fallbackDirectory, "database.sqlite"));
+    const primaryDatabase = database;
+
+    try {
+      expect(applyMigrations(fallbackDatabase, migrationsDirectory, { fts5: false })).toEqual([
+        1, 2,
+      ]);
+      expect(getSearchIndexMode(fallbackDatabase)).toBe("portable");
+      database = fallbackDatabase;
+      insertAgentChannel();
+      insertIntent("int_11111111-1111-4111-8111-111111111111");
+      insertPendingVideo(
+        "vid_11111111-1111-4111-8111-111111111111",
+        "int_11111111-1111-4111-8111-111111111111",
+      );
+
+      expect(findSearchRows(fallbackDatabase, "titletoken")).toHaveLength(1);
+      fallbackDatabase
+        .prepare("UPDATE videos SET title = ? WHERE id = ?")
+        .run("Replacement newtoken", "vid_11111111-1111-4111-8111-111111111111");
+      expect(findSearchRows(fallbackDatabase, "titletoken")).toHaveLength(0);
+      expect(findSearchRows(fallbackDatabase, "newtoken")).toHaveLength(1);
+      fallbackDatabase
+        .prepare("DELETE FROM videos WHERE id = ?")
+        .run("vid_11111111-1111-4111-8111-111111111111");
+      expect(findSearchRows(fallbackDatabase, "newtoken")).toHaveLength(0);
+    } finally {
+      database = primaryDatabase;
+      fallbackDatabase.close();
+      rmSync(fallbackDirectory, { recursive: true, force: true });
+    }
   });
 
   it("loads typed config once and fails closed on missing or invalid values", async () => {

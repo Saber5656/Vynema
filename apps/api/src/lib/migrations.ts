@@ -7,6 +7,29 @@ import { backupDatabase, type Database } from "./database.js";
 const MIGRATION_NAME = /^(\d{4,})_[a-z0-9][a-z0-9_-]*\.sql$/;
 const MAX_USER_VERSION = 2_147_483_647;
 const MIGRATION_LEDGER = "schema_migrations";
+const FTS5_BLOCK_START = "-- vynema:fts5:start";
+const FTS5_BLOCK_END = "-- vynema:fts5:end";
+
+const PORTABLE_SEARCH_INDEX_SQL = `
+-- The Node 22.13 Linux SQLite build does not include FTS5. Keep the same
+-- synchronized search-document contract so #15 can use a bounded LIKE fallback.
+CREATE TABLE videos_fts (
+  rowid INTEGER PRIMARY KEY,
+  title TEXT NOT NULL COLLATE NOCASE,
+  description TEXT NOT NULL COLLATE NOCASE
+) STRICT;
+CREATE INDEX idx_videos_fts_title ON videos_fts(title);
+CREATE INDEX idx_videos_fts_description ON videos_fts(description);
+CREATE TRIGGER videos_fts_ai AFTER INSERT ON videos BEGIN
+  INSERT INTO videos_fts(rowid, title, description) VALUES (new.rowid, new.title, new.description);
+END;
+CREATE TRIGGER videos_fts_ad AFTER DELETE ON videos BEGIN
+  DELETE FROM videos_fts WHERE rowid = old.rowid;
+END;
+CREATE TRIGGER videos_fts_au AFTER UPDATE OF title, description ON videos BEGIN
+  UPDATE videos_fts SET title = new.title, description = new.description WHERE rowid = old.rowid;
+END;
+`;
 
 export type Migration = {
   name: string;
@@ -25,6 +48,12 @@ export type MigrationResult = {
   backupPath: string | null;
 };
 
+export type MigrationCapabilities = Readonly<{
+  fts5: boolean;
+}>;
+
+export type SearchIndexMode = "fts5" | "portable";
+
 type UserVersionPragma = {
   user_version: number;
 };
@@ -35,6 +64,79 @@ type MigrationLedgerRow = {
   sha256: string;
   applied_at: number;
 };
+
+type CompileOptionRow = {
+  enabled: number;
+};
+
+type SearchIndexSchemaRow = {
+  sql: string | null;
+};
+
+export function detectMigrationCapabilities(database: Database): MigrationCapabilities {
+  const row = database
+    .prepare("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS enabled")
+    .get() as CompileOptionRow | undefined;
+
+  if (!row || (row.enabled !== 0 && row.enabled !== 1)) {
+    throw new Error("SQLite returned an invalid FTS5 capability result.");
+  }
+
+  return { fts5: row.enabled === 1 };
+}
+
+export function getSearchIndexMode(database: Database): SearchIndexMode {
+  const row = database
+    .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'videos_fts'")
+    .get() as SearchIndexSchemaRow | undefined;
+
+  if (!row?.sql) {
+    throw new Error("The videos_fts search index is missing.");
+  }
+
+  return /\bUSING\s+fts5\b/i.test(row.sql) ? "fts5" : "portable";
+}
+
+function renderMigrationSql(sql: string, capabilities: MigrationCapabilities): string {
+  const start = sql.indexOf(FTS5_BLOCK_START);
+  const end = sql.indexOf(FTS5_BLOCK_END);
+
+  if (start === -1 && end === -1) {
+    return sql;
+  }
+
+  if (
+    start === -1 ||
+    end === -1 ||
+    end <= start ||
+    sql.includes(FTS5_BLOCK_START, start + FTS5_BLOCK_START.length) ||
+    sql.includes(FTS5_BLOCK_END, end + FTS5_BLOCK_END.length)
+  ) {
+    throw new Error("Migration has malformed FTS5 capability markers.");
+  }
+
+  const selectedSearchSql = capabilities.fts5
+    ? sql.slice(start + FTS5_BLOCK_START.length, end)
+    : PORTABLE_SEARCH_INDEX_SQL;
+
+  return `${sql.slice(0, start)}-- selected search index: ${capabilities.fts5 ? "fts5" : "portable"}\n${selectedSearchSql}${sql.slice(end + FTS5_BLOCK_END.length)}`;
+}
+
+function assertRuntimeCompatibleSchema(database: Database): void {
+  const row = database
+    .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'videos_fts'")
+    .get() as SearchIndexSchemaRow | undefined;
+
+  if (
+    row?.sql &&
+    /\bUSING\s+fts5\b/i.test(row.sql) &&
+    !detectMigrationCapabilities(database).fts5
+  ) {
+    throw new Error(
+      "This database requires SQLite FTS5, but the current runtime does not provide it.",
+    );
+  }
+}
 
 function readUserVersion(database: Database): number {
   const pragma = database.prepare("PRAGMA user_version").get() as UserVersionPragma | undefined;
@@ -109,6 +211,7 @@ export function getMigrationStatus(
   database: Database,
   migrationsDirectory: string,
 ): MigrationStatus {
+  assertRuntimeCompatibleSchema(database);
   const currentVersion = readUserVersion(database);
   const migrations = discoverMigrations(migrationsDirectory);
   const latestVersion = migrations.at(-1)?.version ?? 0;
@@ -215,7 +318,11 @@ function verifyAppliedMigrationMetadata(
   }
 }
 
-export function applyMigrations(database: Database, migrationsDirectory: string): number[] {
+export function applyMigrations(
+  database: Database,
+  migrationsDirectory: string,
+  capabilities = detectMigrationCapabilities(database),
+): number[] {
   const foreignKeys = database.prepare("PRAGMA foreign_keys").get() as
     { foreign_keys: number } | undefined;
 
@@ -246,7 +353,7 @@ export function applyMigrations(database: Database, migrationsDirectory: string)
         discoverMigrations(migrationsDirectory),
         currentVersion,
       );
-      database.exec(sql);
+      database.exec(renderMigrationSql(sql, capabilities));
       database
         .prepare(
           "INSERT INTO schema_migrations (version, name, sha256, applied_at) VALUES (?, ?, ?, ?)",

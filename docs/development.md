@@ -61,6 +61,13 @@ enforcement, and applies pending numbered SQL files from
 server creates and integrity-checks a timestamped SQLite backup under
 `.local/backups/`. If backup creation fails, migration fails closed.
 
+The bundled SQLite capability is detected during the first migration. Runtimes
+with FTS5 install the local full-text index; the supported Node 22.13 Linux
+build, which omits FTS5, installs a synchronized indexed search-document table
+instead. Both modes preserve the same video/search lifecycle, and the raw
+migration checksum is identical. A database that requires FTS5 is rejected
+before use on a runtime that does not provide it.
+
 Configuration is optional for the skeleton. To override the database path or
 prepare empty placeholders for later local-only auth work:
 
@@ -96,6 +103,9 @@ Inspect schema object names and the non-secret platform defaults:
 ```sh
 pnpm --filter @vynema/api db:inspect
 ```
+
+The output includes `searchIndexMode` (`fts5` or `portable`) so downstream
+search debugging never has to infer the installed mode from a failed query.
 
 Create an additional verified backup without applying migrations:
 

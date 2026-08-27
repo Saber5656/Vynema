@@ -363,7 +363,10 @@ BEFORE UPDATE OF intent_id, agent_id, channel_id, video_blob_id, thumbnail_blob_
   ) THEN RAISE(ABORT, 'invalid thumbnail blob reference') END;
 END;
 
--- Full-text search (external content FTS5; local SQLite)
+-- Full-text search. The migration runner selects this FTS5 block when the
+-- bundled SQLite exposes FTS5 and installs a synchronized portable table when
+-- the supported Node 22.13 Linux build does not.
+-- vynema:fts5:start
 CREATE VIRTUAL TABLE videos_fts USING fts5(
   title, description,
   content='videos', content_rowid='rowid'
@@ -378,6 +381,7 @@ CREATE TRIGGER videos_fts_au AFTER UPDATE OF title, description ON videos BEGIN
   INSERT INTO videos_fts(videos_fts, rowid, title, description) VALUES ('delete', old.rowid, old.title, old.description);
   INSERT INTO videos_fts(rowid, title, description) VALUES (new.rowid, new.title, new.description);
 END;
+-- vynema:fts5:end
 
 CREATE TABLE comments (
   id TEXT PRIMARY KEY,
@@ -525,6 +529,18 @@ CREATE TABLE rate_limits (
 -- fix the SQL, and re-apply. Never partially edit an applied migration.
 ```
 
+The migration runner probes the bundled SQLite compile options before applying
+`0001`. When FTS5 is available, the marked block above is applied unchanged.
+When it is unavailable (including the supported Node 22.13 Linux build), the
+runner replaces only that marked block with a `STRICT` `videos_fts` search
+document table, case-insensitive title/description indexes, and equivalent
+insert/update/delete synchronization triggers. The raw migration file remains
+the checksum source in both modes. Search code in #15 must inspect the installed
+table mode and use `MATCH` for FTS5 or a bounded `LIKE` query for the portable
+mode; visibility filtering remains against canonical `videos` rows in either
+case. A database containing an FTS5 virtual table fails closed when opened by a
+runtime that cannot provide FTS5.
+
 ### 3. `0002_seed_config.sql`
 
 `INSERT OR IGNORE INTO platform_config (key, value, updated_at, updated_by) VALUES …` for every ADR-009 key/default from issue #2 (uploads_enabled=true, publication_enabled=true, public_read_enabled=true, max_video_bytes=104857600, max_thumbnail_bytes=2097152, max_declared_duration_seconds=600, allowed_video_mime=video/mp4, per_agent_daily_intents=5, per_agent_active_storage_bytes=2147483648, global_daily_intents=20, global_active_storage_bytes=8589934592, per_agent_daily_publications=5, global_daily_publications=20). Use `0` as updated_at for seeds.
@@ -565,7 +581,7 @@ CREATE TABLE rate_limits (
 | video lifecycle | `ai_generated != 1`, direct publication, publication without an approved review, `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps fail |
 | purge FK behavior | deleting a referenced BLOB fails; eligible rejected purge clears references and deletes same-intent BLOB in one transaction; injected failure rolls all of it back |
 | uniqueness | duplicate `agent_nonces` (agent_id, nonce) fails; duplicate `videos.intent_id` fails; duplicate `likes` PK fails |
-| FTS sync | insert video → `SELECT rowid FROM videos_fts WHERE videos_fts MATCH 'title-token'` finds it; update title → old token gone, new found; delete → gone |
+| search sync | both forced portable mode and runtime-selected mode keep `videos_fts` synchronized across insert/update/delete; FTS5 uses `MATCH`, portable mode uses bounded case-insensitive search |
 | config load | `getConfig` returns typed values; deleting a key makes it throw `ConfigUnavailableError` |
 | quota integrity | non-integer/negative counters and non-integer ledger deltas fail; ledger records the identical `period_start`; daily rollover reconciles per period; double/insufficient release rolls back |
 | restore preflight | a valid SQLite file with incompatible migration metadata is rejected without changing the active database |
