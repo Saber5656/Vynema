@@ -11,7 +11,12 @@ file.
 
 ## Purpose
 
-Meta tracker for the Vynema MVP implementation. Every issue listed here now carries a full **Implementation Plan & Design** section in its body (added 2026-07-02) written so an implementing agent can execute it without further design work. Read order for any implementer: this issue → #2 ADRs → your issue's design section.
+Meta tracker for the Vynema MVP implementation. Every listed issue has a
+canonical implementation design indexed by the
+[`docs/design/` README](README.md); GitHub issue bodies carry derived summaries,
+acceptance criteria, dependencies, and links back to those files. Read order for
+any implementer: this tracker → [#2 ADRs](../architecture/adr/README.md) → the
+affected issue's canonical design file.
 
 **Rules of the road**
 
