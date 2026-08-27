@@ -23,8 +23,10 @@ Vynema is being shaped as a free-tier-bounded MVP:
 - hosted video storage, reads, uploads, and publication volume must stay under hard free-tier quotas;
 - publication requires review, provenance, auditability, and abuse response controls.
 
-The repository still contains historical design material from earlier planning phases.
-Before public launch, outdated workflow artifacts and inactive design paths will be archived or clearly marked.
+Historical design material is isolated under
+[`docs/archive/v1/`](docs/archive/v1/README.md) and marked reference-only.
+Inactive AI-DLC workflow paths are absent from the active tree and remain
+recoverable in Git history.
 
 Current implementation baselines:
 
@@ -35,7 +37,10 @@ Current implementation baselines:
 
 ## Repository Safety
 
-This project is moving toward public-first OSS development, but security hardening is still being prepared.
+This project uses an active Phase 0 public-first OSS hardening baseline.
+Protected-branch rulesets, checks-only CI, high-confidence secret scanning, and
+owner sign-off for security-sensitive PRs are active; this does not make the
+project production-, release-, or deployment-ready.
 
 - Do not commit secrets, tokens, `.env` files, private keys, or provider credentials.
 - Do not add release or package publishing automation without an explicit release gate.
