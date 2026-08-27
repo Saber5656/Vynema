@@ -2,10 +2,16 @@
 
 Status: source of truth for MVP implementation design (moved from GitHub Issue bodies 2026-07-03)
 
-Each file below is the canonical implementation design for one GitHub issue.
-Edit the file for any future design change; the corresponding GitHub issue
-body only carries a short summary, acceptance criteria, dependencies, and a
-link back here. Do not re-add design content to the issue body.
+Each file below is the canonical implementation design for one GitHub issue
+or for approved split units that share one parent design file. Edit the file
+for future design changes; GitHub issue bodies carry only derived summaries,
+acceptance criteria, dependencies, and a link back here. Do not duplicate the
+full design in Issue bodies.
+
+The section headings below are discovery groupings, not scheduling authority.
+The current S0-S9 dependency DAG in
+[issue-038-implementation-tracker.md](issue-038-implementation-tracker.md) is
+normative.
 
 Start here: [issue-038-implementation-tracker.md](issue-038-implementation-tracker.md)
 for wave-ordered dependencies and cross-issue contracts (canonical signing
@@ -48,8 +54,8 @@ directory.
 | File | Issue |
 |---|---|
 | [issue-007-signed-agent-request-verification.md](issue-007-signed-agent-request-verification.md) | [#7](https://github.com/Saber5656/Vynema/issues/7) |
-| [issue-009-object-storage-bucket-policy.md](issue-009-object-storage-bucket-policy.md) | [#9](https://github.com/Saber5656/Vynema/issues/9) |
-| [issue-035-agent-reference-cli.md](issue-035-agent-reference-cli.md) | [#35](https://github.com/Saber5656/Vynema/issues/35) |
+| [issue-009-object-storage-bucket-policy.md](issue-009-object-storage-bucket-policy.md) | [#9](https://github.com/Saber5656/Vynema/issues/9) — #9A storage writes/capabilities |
+| [issue-035-agent-reference-cli.md](issue-035-agent-reference-cli.md) | [#35](https://github.com/Saber5656/Vynema/issues/35) — #35S keygen/signing/vectors |
 
 ## Wave 5 — Upload pipeline
 
@@ -65,6 +71,7 @@ directory.
 | [issue-011-publication-state-machine.md](issue-011-publication-state-machine.md) | [#11](https://github.com/Saber5656/Vynema/issues/11) |
 | [issue-012-manual-review-queue.md](issue-012-manual-review-queue.md) | [#12](https://github.com/Saber5656/Vynema/issues/12) |
 | [issue-015-public-feed-search-apis.md](issue-015-public-feed-search-apis.md) | [#15](https://github.com/Saber5656/Vynema/issues/15) |
+| [issue-009-object-storage-bucket-policy.md](issue-009-object-storage-bucket-policy.md) | [#54](https://github.com/Saber5656/Vynema/issues/54) — #9B public media reads |
 
 ## Wave 7 — Product surfaces
 
@@ -72,6 +79,7 @@ directory.
 |---|---|
 | [issue-016-viewer-pages.md](issue-016-viewer-pages.md) | [#16](https://github.com/Saber5656/Vynema/issues/16) |
 | [issue-013-abuse-reports-takedown-revocation.md](issue-013-abuse-reports-takedown-revocation.md) | [#13](https://github.com/Saber5656/Vynema/issues/13) |
+| [issue-035-agent-reference-cli.md](issue-035-agent-reference-cli.md) | [#56](https://github.com/Saber5656/Vynema/issues/56) — #35U upload/finalize/status CLI |
 
 ## Wave 8 — Interactions & ops UI
 
@@ -87,7 +95,8 @@ directory.
 |---|---|
 | [issue-020-test-matrix-e2e.md](issue-020-test-matrix-e2e.md) | [#20](https://github.com/Saber5656/Vynema/issues/20) |
 | [issue-021-cicd-deployment-pipeline.md](issue-021-cicd-deployment-pipeline.md) | [#21](https://github.com/Saber5656/Vynema/issues/21) |
-| [issue-022-observability-audit-runbooks.md](issue-022-observability-audit-runbooks.md) | [#22](https://github.com/Saber5656/Vynema/issues/22) |
+| [issue-022-observability-audit-runbooks.md](issue-022-observability-audit-runbooks.md) | [#22](https://github.com/Saber5656/Vynema/issues/22) — #22A audit core |
+| [issue-022-observability-audit-runbooks.md](issue-022-observability-audit-runbooks.md) | [#55](https://github.com/Saber5656/Vynema/issues/55) — #22B admin audit/observability/runbooks |
 | [issue-029-terraform-iac-posture.md](issue-029-terraform-iac-posture.md) | [#29](https://github.com/Saber5656/Vynema/issues/29) |
 
 ## Wave 10 — Launch

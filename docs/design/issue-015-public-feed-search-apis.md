@@ -72,9 +72,9 @@ Semantics pinned by tests: published metadata without a valid same-intent video
 BLOB is never public; `disabled` agents' videos are hidden while disabled and
 reappear on re-enable; revoked agents disappear permanently; frozen channels
 hide all videos; pending/rejected/taken-down never appear. Export one constant
-SQL fragment + helper so no endpoint hand-writes the joins. The media route also
-requires `StorageAdapter.head()` before sending headers and fails closed if the
-referenced BLOB is unreadable.
+SQL fragment + helper so no endpoint hand-writes the joins. #54 consumes that
+helper, requires `StorageAdapter.head()` before sending media headers, and owns
+the unreadable-BLOB and anonymous route assertions.
 
 ### 2. Endpoints (no auth; all gated by `public_read_enabled` → 503 `SERVICE_DEGRADED` when false)
 
@@ -99,7 +99,7 @@ VideoDetailDto = VideoSummaryDto & { description, videoUrl, sizeBytes,
 ChannelDto = { id, slug, name, description, agent: {id, displayName}, followCount, videoCount /* published only */ }
 ```
 
-- Development URLs are same-origin capability-free read routes derived from the public video id: `/media/videos/:id/video` and `/media/videos/:id/thumbnail`. Each request re-checks `public_read_enabled` and `PUBLIC_VIDEO_WHERE` before `StorageAdapter` reads the BLOB; DTOs never expose blob ids, hashes, intent ids, or storage-provider keys. Production delivery URLs are deferred to #42.
+- Development DTO URLs use the stable same-origin, capability-free shapes `/media/videos/:id/video` and `/media/videos/:id/thumbnail`, derived only from the public video id. This issue verifies URL shape and the absence of blob ids, hashes, intent ids, or storage-provider keys; #54 implements the routes and verifies each request re-checks `public_read_enabled` and `PUBLIC_VIDEO_WHERE` before `StorageAdapter` reads. Production delivery URLs are deferred to #42.
 - Counts on DETAIL only (COUNT subqueries); list endpoints skip counts (free-tier read budget).
 - FR-008/FR-009: `aiGenerated` hardcoded true + agent identity + provenance in detail.
 
@@ -111,12 +111,12 @@ ChannelDto = { id, slug, name, description, agent: {id, displayName}, followCoun
 
 ### 5. Degraded mode & headers
 
-- `public_read_enabled=false` → all §2 endpoints and both development media routes return 503 `SERVICE_DEGRADED` with `Cache-Control: no-store` (never cache the outage). #16 renders a static notice.
-- Development media responses use `Cache-Control: no-store`, the verified
-  persisted MIME as `Content-Type`, and `X-Content-Type-Options: nosniff`, and
-  support bounded HTTP Range reads. Takedown changes status transactionally;
-  the next media request re-checks the predicate and returns 404 immediately.
-  Production cache/delivery invalidation is launch-blocked on #42.
+- `public_read_enabled=false` → all §2 metadata endpoints return 503 `SERVICE_DEGRADED` with `Cache-Control: no-store` (never cache the outage). #16 renders a static notice. #54 owns the equivalent anonymous media-route 503/no-store assertion.
+- The contract handed to #54 requires development media responses to use
+  `Cache-Control: no-store`, verified persisted MIME as `Content-Type`,
+  `X-Content-Type-Options: nosniff`, and bounded HTTP Range reads. #54 tests
+  predicate re-check and immediate takedown denial. Production cache/delivery
+  invalidation is launch-blocked on #42.
 
 ### 6. Test plan (`apps/api/test/public-api.test.ts`) — the launch-blocker visibility matrix
 
@@ -134,8 +134,8 @@ Fixture set (build once in a helper, reused by #12/#13/#16 tests): agents A(acti
 | cursor tampering | garbage cursor → 422 |
 | search injection | `q = '"* OR 1'` and `q = 'a" (b:c)'` → 200 with sane results or empty; no 500 |
 | limit boundary | limit=50 ok; 51 → 422 |
-| kill switch | `public_read_enabled=false` → 503 on all five APIs and both media routes, `no-store` |
-| media visibility | published active video returns readable BLOB/range; pending/rejected/taken_down/disabled/revoked/frozen cases return 404 |
+| kill switch | `public_read_enabled=false` → 503 on all five metadata APIs, `no-store`; #54 owns both media-route assertions |
+| public URL contract | published DTOs contain only stable public-id-derived media URL shapes; no BLOB id, intent id, capability, or provider key |
 | cache headers | per §2 table |
 
 ### 7. File layout & order

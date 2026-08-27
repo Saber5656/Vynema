@@ -19,51 +19,89 @@ Meta tracker for the Vynema MVP implementation. Every issue listed here now carr
 - One issue = one PR (plus follow-ups for review findings). Every PR cites its issue's "Acceptance mapping & PR evidence" section.
 - Security-sensitive PRs follow `docs/security/security-contract.md` (impact note, boundary evidence, owner sign-off comment).
 
-## Dependency-ordered waves
+## Dependency-ordered delivery stages
 
-Issues within a wave can proceed in parallel; a wave needs its predecessors substantially merged.
+This is the canonical execution order approved in planning issue
+[#53](https://github.com/Saber5656/Vynema/issues/53). A stage may prepare one
+dependency edge ahead only in feature-local paths. Shared-surface integration,
+push, and ready-PR publication wait for every hard predecessor to merge.
 
-| Wave | Issues | Notes |
+| Stage | Parallel delivery units | Exit gate |
 |---|---|---|
-| 0 — Decisions | #2 (ADRs; **owner approval gate**) | #1/#3 close-out (owner confirmation) |
-| 1 — Foundation | #34 (skeleton) | blocks everything below |
-| 2 — Platform | #4 (schema), #19 (API platform) | #21 CI scaffolding (ci.yml) can start here too |
-| 3 — Identity & limits | #5 (human auth), #6 (agent registry), #14 (quota/kill switch) | |
-| 4 — Agent auth & storage | #7 (signing), #9 (SQLite BLOB `StorageAdapter` + one-time capability) | #35 (CLI signing/vectors half) in parallel with #7 |
-| 5 — Upload pipeline | #8 (upload intent), #10 (finalize + callable cleanup) | Production scheduling stays blocked on #42. |
-| 6 — Publication & reads | #11 (state machine), #12 (review queue), #15 (public APIs) | |
-| 7 — Product surfaces | #16 (viewer UI), #13 (abuse/takedown), #35 (CLI upload flow half) | |
-| 8 — Interactions & ops UI | #17 (reactions), #37 (comments), #18 (agent docs + admin dashboard) | |
-| 9 — Quality & ops | #20 (E2E + boundary map), #21 (checks-only CI), #22 (local audit/runbooks), #29 (provider-independent IaC posture) | Production environment work stays blocked on #42. |
-| 10 — Launch | #36 (policy docs — can start any time after Wave 0), #23 (security review closure), #24 (readiness + go/no-go) | |
+| S0 — Control | Read-only #1/#2/#3/#34/#36 disposition, #21/PR #52 ownership, and this planning sync | #53 planning PR merged; no implementation writer before this gate |
+| S1 — Foundation | #4, #19 feature-local shadow, #35 signing/keygen/vectors (#35S); optional #3 or #21 follow-up | #4 merged before #19 integration; #35S is independently publishable |
+| S2 — Shared foundations | #22 audit core (#22A); #5 feature-local preparation; #14 quota-core preparation; #9 storage-write (#9A) one-edge shadow; #46 after #4+#35S | #22A merges before #5/#14 audit integration; #5 merges before #14 admin-route integration, push, and ready PR; shared-surface token serializes integration; #9A integrates only after #4+#14+#19 |
+| S3 — Identity/upload chain | #6→#7, #9A, #46/#21 sidecars, then #8→#10 | #8 waits for #6+#7+#14+#9A; #10 waits for #7+#8+#9A+#14 |
+| S4 — Publication/agent ops | #11 and #18 | #11 and #18 merged; #11 precedes #12 |
+| S5 — Reads/review/CLI | #15, #12, #56 upload/finalize/status CLI (#35U) | #56 waits for #8+#10+#18; shared integration for #15/#12 is serialized |
+| S6 — Product fan-out | #16 UI/mock preparation, #54 public media reads (#9B), #37 backend | #54 waits for #9A+#15; #16 integration and ready PR wait for #54; #37 full UI integration waits for #16 |
+| S7 — Moderation/interactions | #13, #55 admin audit/observability/runbooks (#22B) prep, #20 prep, then #17 | #13 precedes #17; #55 stays preparatory until emitters/#18/#20 exist |
+| S8 — Quality/security | #20 final, then #55 final; #23 local-core security closure | #20 final waits for #54/#56 and implemented product surfaces; #55 final then consumes #20 final plus implemented audit emitters |
+| S9 — Release branch | #42 final decision, then #29 + production implementation Issues, #23 final addendum, #24 | Merge, release, provisioning, and deploy remain separate human gates |
+
+### Canonical hard dependency DAG
+
+The aliases in parentheses identify the retained parent Issue numbers.
+
+```text
+#4 + #19                         -> #22A (#22)
+#4 + #19 + #22A                 -> #5 ready PR
+#4 + #19 + #22A + #5            -> #14 admin routes/push/ready PR
+#4 + #14 + #19                  -> #9A (#9)
+#4 + #19 + #5                   -> #6
+#6 + #35S (#35)                 -> #7 ready PR
+#6 + #7 + #14 + #9A             -> #8
+#7 + #8 + #9A + #14             -> #10
+#4 + #9A + #10 + #14            -> #11
+#4 + #5 + #9A + #11 + #14       -> #12
+#4 + #9A + #11 + #14 + #19      -> #15
+#6 + #7 + #8 + #10 + #14 + #35S -> #18
+#8 + #10 + #18                  -> #35U (#56)
+#9A + #15                       -> #9B (#54)
+#9B (#54)                        -> #16 integration/ready PR
+#5 + #15 + #16 + #19            -> #37 full integration
+#5 + #6 + #11 + #12 + #15 + #36 + #37 -> #13
+#5 + #13 + #15 + #16 + #19      -> #17
+#4 + #5 + #6 + #7 + #8 + #9A + #10 + #11 + #12 + #13 + #14 + #15 + #16 + #17 + #18 + #19 + #34 + #35S + #36 + #37 + #9B (#54) + #35U (#56) -> #20 final
+#22A + #18 + #20 final + #9B (#54) + implemented feature audit emitters -> #22B (#55) final
+#20 final + #22B (#55) final + fresh pricing/limits evidence -> #42 final decision
+#42 -> #29 + production implementation Issues -> #23 final addendum -> #24
+```
+
+#7 may prepare feature-local canonicalization/verifier work after #6's
+contract is fixed, but its vector-consumption integration and ready PR require
+#35S. This is a design-input/ready-PR gate, not a cyclic merge dependency.
 
 ## Checklist (close when merged with evidence)
 
 - [ ] #2 ADRs approved & committed
-- [ ] #34 Application skeleton
+- [ ] #34 Application skeleton accepted
 - [ ] #4 local SQLite schema & migrations
 - [ ] #19 API platform (errors / request IDs / rate limits / CORS)
+- [ ] #22 Audit writer, action registry, and metadata redaction (#22A)
 - [ ] #5 Human auth & no-human-upload boundary
 - [ ] #6 Agent registry & keys
 - [ ] #14 Quota ledger & kill switches
+- [ ] #35 Keygen, signing, and deterministic vectors (#35S)
 - [ ] #7 Signed agent requests & replay protection
-- [ ] #9 Development `StorageAdapter`, SQLite BLOBs & capability policy
-- [ ] #35 Reference agent CLI & test vectors
+- [ ] #9 Development `StorageAdapter`, SQLite BLOB writes, and one-time capabilities (#9A)
 - [ ] #8 Upload-intent API
 - [ ] #10 Finalize & callable development cleanup
 - [ ] #11 Publication state machine
-- [ ] #12 Review queue & actions
+- [ ] #18 Agent docs, status API, and admin dashboard
 - [ ] #15 Public feed/search/channel/detail APIs
+- [ ] #12 Review queue & actions
+- [ ] #56 Reference upload/finalize/status CLI (#35U)
 - [ ] #16 Viewer UI
+- [ ] #54 Development public media reads and policy evidence (#9B)
+- [ ] #37 Comments system
 - [ ] #13 Abuse reports / takedown / revocation
 - [ ] #17 Likes / saves / follows
-- [ ] #37 Comments system
-- [ ] #18 Agent docs & admin dashboard
 - [ ] #20 Test matrix (E2E + boundary map)
 - [ ] #21 Checks-only CI (deployment remains blocked on #42)
-- [ ] #22 Observability / audit / runbooks
+- [ ] #55 Admin audit, observability docs, runbooks, and ops status (#22B)
 - [ ] #29 Provider-independent IaC posture (provisioning blocked on #42)
-- [ ] #36 Policy docs
+- [ ] #36 Policy docs accepted
 - [ ] #23 Security review closed (owner sign-off)
 - [ ] #24 Launch readiness & go/no-go
 - [ ] #1 / #3 closed with owner confirmation
@@ -97,19 +135,32 @@ also in progress and exclusively owns this file for the slice.
 | #21 checks-only CI | Published as PR #48 from `codex/issue-21-checks-only-ci`; implementation and hosted check evidence are available for review | Ready PR requires checks-only implementation, required role reviews, and actual green-run evidence; deployment remains blocked on #42 |
 | #38 tracker sync | In progress | This tracker file is the lane's only repository-owned path |
 
-### Fixture and #35 split gates
+### Approved split gates
 
-- Issue [#46](https://github.com/Saber5656/Vynema/issues/46) owns the
-  local-only test agent, channel, and agent-key fixture formerly coupled to
-  #4. It waits for the #4 schema and the finalized signing-vector public key /
-  `keyId`; this keeps incomplete #35 artifacts out of schema delivery and all
-  production migrations. The canonical #4 design marks this fixture as out of
-  scope and defers its implementation and usage documentation to #46.
-- Before #35 implementation begins, split its work into a signing/vectors
-  issue and an upload/status client issue. The signing/vector side owns the
-  deterministic vector and public-key contract consumed by #46; the
-  upload/status side remains gated by the upload pipeline. #35 is not started
-  or completed by the current slice.
+- Stage 1 of [#53](https://github.com/Saber5656/Vynema/issues/53)
+  created [#54](https://github.com/Saber5656/Vynema/issues/54) (#9B),
+  [#55](https://github.com/Saber5656/Vynema/issues/55) (#22B), and
+  [#56](https://github.com/Saber5656/Vynema/issues/56) (#35U). The retained
+  parents are #9A/#9, #22A/#22, and #35S/#35.
+- [#46](https://github.com/Saber5656/Vynema/issues/46) waits for the #4 schema
+  and #35S's finalized signing-vector public key/`keyId`; it never stores a
+  private-key fixture and remains local-development-only.
+- #9A integrates only after #4, #14, and #19 merge. #54 starts only after #9A
+  and #15 merge.
+- #5's feature-local code and #14's quota core can prepare after #4+#19, but
+  their audit integration waits for #22A. #14 admin-route integration, push, and
+  ready-PR publication additionally wait for #5's canonical
+  `requireRole("admin")` and unauthorized/forbidden boundary tests; #14 must not
+  introduce a local auth stub or parallel role checker. All later feature
+  emitters consume the same typed writer, action registry, and redaction
+  contract. #20 can prepare feature-local tests, but its final gate waits for
+  implemented product surfaces, #54, and #56. #55 can prepare feature-local
+  docs, but its final gate waits for #22A, #18, #20 final, #54, and implemented
+  feature audit emitters.
+- #35S owns keygen/signing/vectors. #56 owns upload/finalize/status and starts
+  only after #8, #10, and #18 merge.
+- #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented;
+  their remaining acceptance gates stay explicit.
 
 ## Cross-issue contracts (quick index)
 
@@ -118,13 +169,16 @@ also in progress and exclusively owns this file for the slice.
 | ADRs (stack, conventions, quota defaults) | #2 | all |
 | DDL & enums | #4 | all backend |
 | Error codes & envelope | #19 | all APIs + web |
-| Signing canonical string | #7 (normative) | #35, #8, #10, #18 |
-| keyId derivation | #6 §1 = #35 §2 | #7 |
-| Public visibility predicate | #15 §1 | #12, #13, #17, #37, #16 |
+| Signing canonical string and vectors | #7 normative + #35S/#35 vectors | #8, #10, #18, #56 |
+| keyId derivation | #6 §1 = #35S/#35 | #7, #46 |
+| Public visibility predicate | #15 §1 | #12, #13, #17, #37, #16, #54 |
 | Storage accounting (reservation model) | #10 (canonical) = #14 (amended) | #8, #11 |
 | Video status transitions (single writer) | #11 §1 | #12, #13 |
-| Development media BLOB/capability contract | #9 | #8, #10, #11, #13 |
-| Audit action registry | #22 §1 | all |
+| Development media write/capability contract | #9A/#9 | #8, #10, #11, #12 preview, #54 |
+| Development public media-read boundary | #9B/#54 + #15 predicate | #13, #16 integration/ready PR, #20 final, #55 runbooks |
+| Audit action registry and metadata redaction | #22A/#22 | #5, #14, all later feature emitters, #55 |
+| Whole-product E2E and boundary evidence | #20 | #55, #23, #24, #42 |
+| Admin audit/runbook evidence | #22B/#55 | #23, #24, #42 |
 | Report/moderation enums | #36 = #4 DDL | #13, #37 |
 
 Post-MVP (not in the waves): #31 automated review layer.

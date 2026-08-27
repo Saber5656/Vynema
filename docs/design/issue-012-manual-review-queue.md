@@ -30,24 +30,28 @@ Build the manual pre-publication review flow for finalized agent submissions, in
 - [ ] Finalized submissions appear in the review queue.
 - [ ] Reviewers can approve or reject with required reason.
 - [ ] Approved submissions can proceed to publication.
-- [ ] Rejected submissions remain non-public and auditable.
+- [ ] Rejected submissions persist in the `rejected` state with an audit record; #15 and #54 own anonymous public metadata and media-route suppression.
 - [ ] Unauthorized users cannot access review actions.
 - [ ] Tests cover queue visibility, approve, reject, and authorization.
 
 ## Dependencies
 
-- AIT-MVP-004.
-- AIT-MVP-005.
-- AIT-MVP-010.
+- #4.
+- #5.
+- #9 (storage-write #9A).
+- #11.
+- #14.
+
+#10 is transitive through #11; #12 must not start before #11.
 
 ## Notes
 
-- Publishing pauses if manual review capacity cannot keep up.
+- Publishing pauses if manual review capacity cannot keep up. This issue retains the reviewer/admin-only preview authorization tests; #54 owns anonymous public media-route assertions.
 
 ---
 Stable Issue Key: AIT-MVP-012
 Classification: MVP Blocking
-Dependencies: AIT-MVP-004, AIT-MVP-005, AIT-MVP-010
+Dependencies: #4, #5, #9 (#9A), #11, #14
 Recommended Labels: area/moderation, area/admin, area/frontend, area/backend, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -55,7 +59,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4, #5 (`requireRole`), #9 (`StorageAdapter`), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), #14 (switch behavior). Coordinate: this issue passes its `moderation_reviews` INSERT into #11's transaction via the `extraStatements` parameter.
+> Normative. Prerequisites: #4, #5 (`requireRole`), #9A/#9 (`StorageAdapter`), #11 (`publishVideo`/`rejectVideo` — the ONLY status writers), and #14 (switch behavior). #11 must merge first. This issue passes its `moderation_reviews` INSERT into #11's transaction via the `extraStatements` parameter.
 
 ### 1. API (GET routes `requireRole("reviewer" | "admin")`; approve/reject `requireRole("reviewer")`; all origin-check)
 
@@ -90,13 +94,13 @@ Pending preview uses a reviewer/admin-only same-origin route that resolves the v
 | Case | Expect |
 |---|---|
 | viewer requests queue / approve | 403 both |
-| reviewer approves pending video | 200; video published and visibility-checked media route reads the same immutable BLOB; `moderation_reviews` row `approved` **in the same transaction**; injected rollback leaves neither review nor publish effect; audit `publish.ok` |
+| reviewer approves pending video | 200; video status `published` with the same immutable BLOB reference; `moderation_reviews` row `approved` **in the same transaction**; injected rollback leaves neither review nor publish effect; audit `publish.ok` |
 | reject without reason | 422 |
 | approve/reject with whitespace-only reason | 422 `VALIDATION_FAILED` before `publishVideo`/`rejectVideo`; no status change; no `moderation_reviews` row |
-| reject with reason | rejected; review row persisted; NOT in public APIs (#15 fixture reused) |
+| reject with reason | status `rejected`; review row and audit persisted; #15/#54 own public HTTP suppression assertions |
 | approve already-rejected | 409 |
 | double approve (retry) | idempotent 200; the retry returns before `extraStatements`, so exactly one approved review row and one publish counter/audit effect exist |
-| preview pending media | reviewer/admin-only same-origin preview route returns 200 + audit; no session → 401, viewer session → 403; the separate public media route for the pending video → 404 |
+| preview pending media | reviewer/admin-only same-origin preview route returns 200 + audit; no session → 401; viewer session → 403; no anonymous URL or BLOB id is returned |
 | preview route for published video | 409 |
 | `publication_enabled=false` | approve → 503; reject → still 200 |
 | queue ordering | 3 fixtures submitted in order → returned FIFO |
@@ -109,5 +113,5 @@ UI component tests: role guard redirect; reject requires reason; kill-switch ban
 
 ### 5. Acceptance mapping & PR evidence
 
-- "Finalized submissions appear in queue" → queue test; "approve/reject with required reason" → §1/§3; "approved proceed to publication" → via #11; "rejected remain non-public and auditable" → reject test + #15 filter; "unauthorized users cannot access" → 403 tests.
+- "Finalized submissions appear in queue" → queue test; "approve/reject with required reason" → §1/§3; "approved proceed to publication" → via #11; "rejected persist as non-public state and auditable" → reject state/audit test + #15 predicate contract, while #54 owns anonymous route denial; "unauthorized users cannot access" → 403 tests.
 - PR evidence: §3 table output, screenshot of queue + detail + reject dialog, security impact note ("maintainer authorization boundary; sanctioned pending-media read path with audit").

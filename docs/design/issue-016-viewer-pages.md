@@ -28,7 +28,7 @@ Build the human viewer UI for browsing, searching, watching, and inspecting AI-g
 
 ## Acceptance Criteria
 
-- [ ] Viewers can browse public feed, search, open channels, and watch videos.
+- [ ] Viewers can browse public feed, search, open channels, and watch videos through #54's visibility-checked public media routes.
 - [ ] UI handles loading, empty, error, taken-down, and quota-degraded states.
 - [ ] Video pages clearly display AI-generated labeling.
 - [ ] No UI route exposes human upload or publish.
@@ -38,6 +38,7 @@ Build the human viewer UI for browsing, searching, watching, and inspecting AI-g
 ## Dependencies
 
 - AIT-MVP-015.
+- #54 is required for integration and ready-PR publication; UI/component work and mock-backed tests may be prepared in parallel.
 
 ## Notes
 
@@ -46,7 +47,7 @@ Build the human viewer UI for browsing, searching, watching, and inspecting AI-g
 ---
 Stable Issue Key: AIT-MVP-016
 Classification: MVP Blocking
-Dependencies: AIT-MVP-015
+Dependencies: AIT-MVP-015; #54 for integration and ready PR (UI/mock preparation may proceed in parallel)
 Recommended Labels: area/frontend, area/viewer, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -54,7 +55,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #34 (SPA shell), #15 (public APIs + shared DTO types), #5 (`/api/me` for header state). Interaction widgets (like/save/follow) come from #17 and comments from #37 — this issue renders their mount points but must not block on them (feature-flag by presence: render placeholders if those PRs haven't landed).
+> Normative. Prerequisites: #34 (SPA shell), #15 (public APIs + shared DTO types), #5 (`/api/me` for header state). UI/component and mock-backed test preparation may proceed before #54, but shared integration and ready-PR publication require #54 to merge. Interaction widgets (like/save/follow) come from #17 and comments from #37 — this issue renders their mount points but must not block on them (feature-flag by presence: render placeholders if those PRs haven't landed).
 
 ### 1. Routes & pages
 
@@ -114,6 +115,5 @@ Footer links: the three policy docs (#36) on GitHub (external links are acceptab
 
 ### 7. Acceptance mapping & PR evidence
 
-- "Browse/search/channels/watch" → §1; "loading/empty/error/taken-down/degraded states" → §3 table tests; "AI-generated labeling clear" → `AIBadge` on every card + page (screenshot); "no upload UI" → §4 test output; "responsive" → §2 grid + player (mobile/desktop screenshots); "accessibility" → §5 checklist + lint.
+- "Browse/search/channels/watch" → §1 plus #54's visibility-checked public media routes; "loading/empty/error/taken-down/degraded states" → §3 table tests; "AI-generated labeling clear" → `AIBadge` on every card + page (screenshot); "no upload UI" → §4 test output; "responsive" → §2 grid + player (mobile/desktop screenshots); "accessibility" → §5 checklist + lint.
 - PR evidence: screenshots (home/search/channel/video, mobile+desktop), §4 test output, a11y checklist results.
-

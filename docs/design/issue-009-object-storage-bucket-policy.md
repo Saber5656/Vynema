@@ -1,4 +1,4 @@
-# Issue #9: Implement development media StorageAdapter and capability policy
+# Issue #9 (#9A): Implement development media writes and capability policy
 
 GitHub issue: https://github.com/Saber5656/Vynema/issues/9
 
@@ -10,43 +10,54 @@ file.
 
 ## Summary
 
-Implement local SQLite BLOB media storage and one-time agent upload capabilities while preventing public access to unreviewed media and preserving a production migration seam.
+Implement the provider-independent development storage-write boundary:
+`StorageAdapter`, immutable SQLite BLOB writes, and intent/kind-scoped
+one-time upload capabilities. Public media reads are the split child #54
+(#9B).
 
 ## Scope
 
 - Implement provider-independent development media storage using SQLite BLOBs behind `StorageAdapter`.
-- Define intent/kind-scoped one-time upload capabilities and immutable media ids.
-- Keep development upload/read routes same-origin with no CORS grant.
-- Ensure upload capabilities cannot write unrelated intents/kinds or consume unbounded temporary resources.
-- Document BLOB lifecycle, ownership, retention, and cleanup rules.
+- Define intent/kind-scoped, short-lived, one-time upload capabilities and immutable media ids.
+- Implement the same-origin capability PUT boundary without a CORS grant.
+- Bound temporary bytes, hashing work, deadlines, and capability reuse.
+- Implement intent/kind-scoped adapter deletion and failed-upload temporary-file
+  cleanup. #10 owns reservation-releasing lifecycle cleanup.
 
 ## Out Of Scope
 
+- Public video/thumbnail read routes and public-read policy evidence (#54).
 - Server-side transcoding.
-- Managed paid video delivery.
+- Production buckets, CDN/cache behavior, credentials, or paid video delivery (#42).
 
 ## Acceptance Criteria
 
-- [ ] Agents upload through a scoped, short-lived, one-time development capability.
-- [ ] Pending BLOBs are not publicly accessible.
-- [ ] Public playback only becomes available after review and publication.
-- [ ] Routes never accept a caller-selected BLOB id and always resolve ownership/visibility.
-- [ ] One-time capability claim, byte/deadline bounds, and cleanup fail closed.
-- [ ] Data/security review confirms storage ownership and same-origin restrictions.
+- [ ] Agents write each object through a scoped, short-lived, one-time development capability.
+- [ ] Capability claim, byte/deadline bounds, digest/MIME checks, and completion fail closed.
+- [ ] Committed BLOBs are immutable and ownership-bound to one intent and media kind.
+- [ ] Routes never accept a caller-selected BLOB id.
+- [ ] Failed or interrupted PUTs remove private temporary files,
+      ownership-scoped adapter deletion cannot cross intent/kind, and a claimed
+      capability cannot become reusable. #10 owns reservation release and
+      lifecycle-cleanup idempotency.
+- [ ] Data/security review confirms storage ownership, same-origin restrictions, and secret-safe evidence.
 
 ## Dependencies
 
-- AIT-MVP-002.
-- AIT-MVP-008.
+- #4.
+- #14.
+- #19.
 
 ## Notes
 
 - The application must not store video files as frontend assets.
+- [#54](https://github.com/Saber5656/Vynema/issues/54) owns #9B public media
+  reads and policy evidence after #9A and #15 merge.
 
 ---
 Stable Issue Key: AIT-MVP-009
 Classification: MVP Blocking
-Dependencies: AIT-MVP-002, AIT-MVP-008
+Dependencies: #4, #14, #19
 Recommended Labels: area/storage, area/infra, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -54,7 +65,8 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (amended 2026-07-15)
 
-> Normative for development. Implements ADR-003. Production database, media
+> Normative for #9A development writes. Prerequisites: #4, #14, and #19.
+> Implements the write/capability half of ADR-003. Production database, media
 > storage, delivery, provider, pricing, credentials, and migration are deferred
 > to launch-blocking issue #42.
 
@@ -85,8 +97,10 @@ cross-provider atomicity; #42 must instead design staging, idempotency,
 reconciliation, and cleanup that preserve the same logical invariant.
 All development deletes run inside `withTransaction` and receive that same
 repository/adapter SQLite transaction. `deleteOwned` includes intent and kind in
-its predicate and the caller checks its affected-row result, so reference
-clearing, owned-BLOB deletion, counters/ledger, and audit commit atomically.
+its predicate and returns whether that exact owned row was deleted; it does not
+clear references or update counters, ledger rows, or audit events. #10 owns the
+callable cleanup job that composes reference clearing, this deletion primitive,
+reservation release, ledger updates, and audit in one lifecycle transaction.
 
 ### 2. SQLite BLOB implementation
 
@@ -119,11 +133,18 @@ clearing, owned-BLOB deletion, counters/ledger, and audit commit atomically.
 - The PUT route compares token hashes in constant time, rejects expired,
   claimed, or used tokens, and obtains expected metadata only from the persisted
   capability/intent. It claims before reading, then atomically marks completion
-  with the verified BLOB commit. A claimed-but-incomplete token is terminal and
-  cleanup releases its intent reservation; ambiguous clients query state.
+  with the verified BLOB commit. A claimed-but-incomplete token is terminal;
+  #10's callable cleanup job owns the later intent transition and reservation
+  release. Ambiguous clients query state.
 - Raw tokens, BLOB ids, media bytes, and non-public identifiers are never logged.
 
-### 4. Development public-read boundary
+### Split child: #54 / #9B public media-read boundary
+
+The following public-read requirements are canonical for
+[#54](https://github.com/Saber5656/Vynema/issues/54), not part of the #9A PR.
+They consume #9A's adapter/write contract and #15's visibility predicate.
+
+#### 4. Development public-read boundary
 
 - Same-origin routes `/media/videos/:id/video` and `/thumbnail` re-check
   `public_read_enabled` and the #15 visibility predicate on every request.
@@ -135,31 +156,48 @@ clearing, owned-BLOB deletion, counters/ledger, and audit commit atomically.
 - Provider domains, public buckets, CDN/cache behavior, and hard spend stops are
   not selected here; #42 must prove equivalent boundaries before release.
 
-### 5. Policy evidence (`docs/security/storage-policy.md`)
+### 5. Split policy evidence (`docs/security/storage-policy.md`)
 
-Record tests proving: capability scope/expiry/reuse rejection; no raw token in
-DB/logs; mismatch leaves no BLOB; pending media route 404; published media/range
-read succeeds; takedown immediately denies while evidence remains; kill switch
-denies media; orphan cleanup is idempotent. Add fault injection between BLOB
-insert and `used_at`, a claim-CAS concurrency barrier, size+1/timeout/disconnect
-cases, and an ambiguous-retry case; no outcome may leave committed bytes with a
-reusable token or a completed token without recoverable bytes.
-Add a barrier after streaming but before the completion guard and race expiry
-cleanup in both orders; no reservation-free BLOB may remain.
+#9A records capability scope/expiry/reuse rejection, no raw token in DB/logs,
+digest/MIME mismatch temporary-file cleanup, claim-CAS races, byte/deadline
+bounds, ambiguous retry, and intent/kind-scoped adapter deletion. #10 records
+reservation-releasing lifecycle and orphan-cleanup evidence.
+
+#54 records private-before-public, published/range reads, pending/failed/
+rejected/taken-down/disabled/revoked/frozen denials, the public-read kill
+switch, allowed restoration, and the absence of private storage identifiers in
+public DTOs. The shared policy document must identify which Issue/PR produced
+each row.
+
+#9A tests prove capability scope/expiry/reuse rejection; no raw token in
+DB/logs; mismatch, timeout, and disconnect remove the private temporary file and
+leave no BLOB; `deleteOwned` cannot delete another intent/kind; fault injection
+between BLOB insert and `used_at`; claim-CAS concurrency; size+1/timeout/
+disconnect; and ambiguous retry. No outcome may leave committed bytes with a
+reusable token or a completed token without recoverable bytes. #10 owns the
+barrier race against expiry cleanup and the reservation/byte accounting
+invariant in both winner orders.
+
+#54 tests prove pending/failed/rejected/taken-down/disabled/revoked/frozen media
+routes deny access; published video/thumbnail and bounded Range reads succeed;
+takedown and the kill switch deny immediately; allowed restoration re-enables
+access only after the shared predicate passes; and public responses never leak
+private storage identifiers. Earlier Issues do not call or implement these
+anonymous routes.
 
 ### 6. Step-by-step order
 
-1. Adapter interface. 2. SQLite BLOB implementation and migration. 3. One-time
-capability PUT route. 4. visibility-checked media routes. 5. cleanup and policy
-evidence. 6. Keep all production provisioning blocked on #42.
+#9A: 1. Adapter interface. 2. SQLite BLOB implementation. 3. One-time
+capability PUT route. 4. intent/kind-scoped deletion, failed-upload temporary
+cleanup, and #9A policy evidence.
+#54 then adds visibility-checked media routes and #9B policy evidence after
+#9A and #15 merge. Keep all production provisioning blocked on #42.
 
 ### 7. Acceptance mapping & PR evidence
 
-- Scoped short-lived capability → §3 tests.
-- Private before publication and takedown → §4 visibility matrix.
-- Provider independence → no cloud credential/config requirement and adapter-only
-  BLOB access.
-- Release migration → #42 must test a staged production adapter/double and may
-  not model an external object store plus database as one atomic transaction.
-- PR evidence: adapter/capability/media-route tests, migration test, secret scan,
-  and security impact note.
+- #9A scoped capability and immutable writes → §§1–3 plus #9A evidence in §5.
+- #54 private-before-public/read/takedown behavior → child §4 plus #9B evidence in §5.
+- Provider independence → no cloud credential/config requirement and adapter-only BLOB access.
+- Release migration → #42 must test staging/reconciliation and may not claim cross-provider atomicity.
+- #9A PR evidence: adapter/capability, temporary-file cleanup, and scoped-deletion tests; secret scan; and security impact note.
+- #54 PR evidence: media-route/visibility transition tests, policy evidence, and security impact note.

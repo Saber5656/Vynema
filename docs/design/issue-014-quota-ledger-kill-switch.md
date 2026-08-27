@@ -39,6 +39,9 @@ Implement free-tier budget enforcement so upload, publication, reads, and intera
 
 - AIT-MVP-002.
 - AIT-MVP-004.
+- AIT-MVP-005; admin-route integration, push, and ready-PR publication wait for its canonical `requireRole("admin")` contract and unauthorized/forbidden boundary tests, but quota-core preparation does not.
+- AIT-MVP-019; feature-local quota preparation starts only after AIT-MVP-004 and AIT-MVP-019.
+- AIT-MVP-022; typed audit-writer integration, push, and ready-PR publication wait for this gate, but quota-core preparation does not.
 
 ## Notes
 
@@ -47,7 +50,7 @@ Implement free-tier budget enforcement so upload, publication, reads, and intera
 ---
 Stable Issue Key: AIT-MVP-014
 Classification: MVP Blocking
-Dependencies: AIT-MVP-002, AIT-MVP-004
+Dependencies: AIT-MVP-002, AIT-MVP-004 + AIT-MVP-019 (quota-core preparation gate), AIT-MVP-022 (audit-integration/push/ready-PR gate), AIT-MVP-005 (admin-route integration/push/ready-PR gate)
 Recommended Labels: area/quotas, area/infra, area/backend, type/implementation, priority/p0, mvp-blocking
 Source Task: TSK-1260
 
@@ -55,7 +58,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4 (`platform_config`, `quota_ledger`, `quota_counters`), #19. Implements ADR-009. Quota is a **security boundary** (threat model): every check fails closed.
+> Normative. #4 (`platform_config`, `quota_ledger`, `quota_counters`) and #19 permit feature-local quota-core preparation. #22A/#22 (typed audit writer, action registry, metadata redaction) MUST merge before audit-emitting integration. #5 MUST merge before admin-route integration and provide the canonical `requireRole("admin")` contract plus unauthorized/forbidden boundary tests. Push and ready-PR publication require both gates; neither #5 nor #22A is a quota-core preparation prerequisite. Implements ADR-009. Quota is a **security boundary** (threat model): every check fails closed.
 
 ### 1. Config keys & defaults
 
@@ -82,7 +85,8 @@ affected row. Every counter change writes a matching `quota_ledger` row in the
 same SQLite transaction (ledger = audit trail, counters = enforcement).
 Release updates require `value >= delta` and an unused lifecycle reference;
 zero affected rows aborts the transaction. This prevents negative counters and
-double-decrement on retry.
+double-decrement on retry. The quota ledger is domain accounting evidence, not
+a substitute for #22A's platform security audit stream.
 
 `checkIntentAllowed` evaluates in order (first failure wins):
 1. `uploads_enabled` false → `UPLOADS_DISABLED`.
@@ -116,17 +120,18 @@ transaction.
 |---|---|---|
 | `uploads_enabled` | intent creation → 503 `UPLOADS_DISABLED`; finalize of EXISTING intents still allowed (they hold storage already) | #8 |
 | `publication_enabled` | review approval returns 503 `PUBLICATION_DISABLED`; queue/reject still work | #11/#12 |
-| `public_read_enabled` | public discovery APIs and the development media route → 503 `SERVICE_DEGRADED`; UI shows a static "temporarily read-limited" notice; admin+agent endpoints unaffected | #15/#16 |
+| `public_read_enabled` | public discovery APIs and the development media route → 503 `SERVICE_DEGRADED`; UI shows a static "temporarily read-limited" notice; admin+agent endpoints unaffected | #15 discovery, #54 media routes, #16 UI |
 
 Switch flips are config updates (§5) — **no deploy, no code change**, satisfying "kill switch without redeploying".
 
 ### 4a. Provider read/spend boundary and QT-004
 
 Development stores media as SQLite BLOBs behind `StorageAdapter`. The application
-serves development media through its own authenticated/visibility-checked route,
-so `public_read_enabled=false` gates both discovery and media bytes. Development
-tests can therefore count requests synchronously and prove the switch fails
-closed without any cloud account or provider credential.
+serves development media through #54's visibility-checked anonymous route, so
+`public_read_enabled=false` gates both discovery and media bytes. #14 proves the
+config lookup and switch policy fail closed; #15 proves discovery 503 behavior;
+#54 proves media-route 503/no-store behavior. These development tests need no
+cloud account or provider credential.
 
 This does **not** claim that QT-004 is mitigated for release. A production media
 provider, delivery path, pricing model, measurable operation/byte boundary, and
@@ -149,7 +154,16 @@ and no Cloudflare/R2-specific risk is accepted by this design.
 | Method & path | Auth | Behavior |
 |---|---|---|
 | `GET /api/admin/quotas` | admin | `getQuotaStatus`: `{switches: {...}, counters: [{scope, scopeId, metric, value, cap, periodStart}], updatedAt}` |
-| `POST /api/admin/config` | admin | body `{key, value}`; key MUST be in the 13-key allowlist; value validated by per-key zod type (boolean/int/string); writes `platform_config` + audit `config.updated` (metadata: key, old, new). Unknown key → 422. |
+| `POST /api/admin/config` | admin | body `{key, value}`; key MUST be in the 13-key allowlist; value validated by per-key zod type (boolean/int/string); writes `platform_config` and emits registered action `config.updated` (metadata: key, old, new) through #22A's typed writer in the same transaction. Direct audit-table insertion is forbidden. Unknown key → 422. |
+
+Quota services, counter/ledger helpers, and `QuotaStatusDto` may be prepared before
+#5. Route registration and request handling MUST wait for #5 and reuse its
+canonical `requireRole("admin")` middleware; a local auth stub, parallel role
+checker, or route-local admin test is forbidden. Boundary tests prove an
+unauthenticated request returns 401 and an authenticated non-admin request
+returns 403, with no config, counter, ledger, or audit mutation in either case.
+The authorized config-update case additionally proves that the config row and
+#22A `config.updated` event commit or roll back together.
 
 ### 6. Ledger lifecycle coverage (must reconcile)
 
@@ -177,9 +191,11 @@ correct `metric`); barrier race at cap−1 gives one commit and never exposes a
 committed counter over cap; fault injection after every §3 statement rolls back
 all state; UTC-day rollover reconciles separately; double release and
 insufficient-gauge release affect zero rows and roll back; switches off →
-correct 503 codes; `public_read_enabled=false` denies
-both development discovery and media routes; `ConfigUnavailableError` → deny;
-§5 config update happy/unknown-key/bad-type + audit row; §6 reconciliation.
+correct fail-closed policy result; #15 owns discovery HTTP 503 tests and #54
+owns media-route 503/no-store tests; `ConfigUnavailableError` → deny;
+§5 unauthenticated 401 and non-admin 403 with no state/audit side effect via
+#5's canonical middleware; config update happy/unknown-key/bad-type + #22A
+typed-writer/redaction evidence for `config.updated`; §6 reconciliation.
 Production provider-spend tests are blocked on #42 and must not be marked
 passing in this issue.
 
@@ -192,9 +208,21 @@ packages/shared/src/schemas/admin-config.ts
 apps/api/test/quota.test.ts
 ```
 
-1. Counter/ledger helpers + reconciliation test. 2. `checkIntentAllowed` + boundary tests. 3. §3 conditional transaction + race/fault-injection tests. 4. Switches + publish check. 5. Admin endpoints + audit. 6. Update `docs/architecture/vynema-architecture.md` Free-Tier Control Points table to reference the config keys.
+1. Counter/ledger helpers + reconciliation test. 2. `checkIntentAllowed` +
+boundary tests. 3. §3 conditional transaction + race/fault-injection tests. 4.
+Switches, publish check, and quota-status service preparation. 5. After #22A
+merges, integrate `config.updated` through its typed writer at the service
+transaction boundary and run audit/redaction tests without registering the
+admin routes. 6. After #5 merges, register both admin routes through its
+canonical `requireRole("admin")`, run the 401/403 no-side-effect tests, then push
+and publish the ready PR. 7. Update
+`docs/architecture/vynema-architecture.md` Free-Tier Control Points table to
+reference the config keys.
 
 ### 9. Acceptance mapping & PR evidence
 
-- "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → `SERVICE_DEGRADED` wiring (#15 completes; state split in PR); "admins see quota state" → §5.
-- PR evidence: boundary test table output + reconciliation test output + security impact note ("quota/cost boundary — fail-closed verified").
+- "Fails closed when quota exhausted" → §2/§3 tests; "kill switch without redeploy" → §4/§5; "ledger updates on intent/finalize/cleanup/publication/takedown" → §6 reconciliation test; "public APIs degrade safely" → fail-closed switch policy here, #15 discovery HTTP evidence, and #54 anonymous media-route evidence; "admins see quota state" → §5.
+- PR evidence: boundary test table output + reconciliation test output + #22A
+  typed-writer/redaction evidence for `config.updated` + #5 canonical-admin
+  middleware evidence (401/403 with no state/audit side effect) + security
+  impact note ("quota/cost boundary — fail-closed verified").

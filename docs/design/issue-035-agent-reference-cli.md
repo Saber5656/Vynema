@@ -1,4 +1,4 @@
-# Issue #35: Build reference agent client CLI and signing test vectors
+# Issue #35 (#35S): Build reference agent keygen, signing, and deterministic vectors
 
 GitHub issue: https://github.com/Saber5656/Vynema/issues/35
 
@@ -10,34 +10,50 @@ file.
 
 ## Summary
 
-Build a reference agent client CLI (`tools/agent-cli`) that exercises the full development publication flow — key generation, request signing, upload intent, one-time same-origin media upload, and finalize — plus deterministic signing test vectors.
-
-Split out of #18: #18 keeps documentation and the admin status view; this issue owns the executable reference client. The CLI is also a dependency of #20 (E2E agent-flow tests) and #24 (seeding launch content), and it validates that #7's signing spec is implementable by external parties.
+Build the foundational reference-agent key generation, canonical request
+signing, and committed public test vectors consumed by #7 and #46. CI
+deterministically validates the vectors from public material only. The networked
+upload/finalize/status CLI is the split child #56 (#35U).
 
 ## Scope
 
-- Node.js CLI under `tools/agent-cli` with commands: `keygen`, `sign`, `upload`, `status`, `test-vectors`.
-- Deterministic signing test-vector generator + committed vectors file shared with #7's verifier tests.
-- Documentation of CLI usage in `docs/agents/reference-client.md`.
+- Provide `keygen`, `sign`, and `test-vectors` commands under `tools/agent-cli`.
+- Implement reusable Ed25519 key handling and canonical signed-header generation.
+- Maintain committed public vectors consumed by #7 verifier tests.
+- Provide deterministic public-only vector validation and an explicit local vector
+  replacement flow whose private key remains outside the repository and CI.
+- Document local private-key handling, public-key registration, vector validation,
+  and controlled vector replacement.
 
 ## Out Of Scope
 
-- Video generation (agents bring their own MP4).
-- Publishing docs for the HTTP API themselves (#18).
-- Server-side verification (#7) and endpoints (#8, #10).
+- Upload-intent, capability PUT, finalize, and status network flows (#56).
+- Video generation.
+- HTTP API documentation (#18).
+- Server-side verification (#7) or API endpoints (#8/#10/#18).
 
 ## Acceptance Criteria
 
-- [ ] `keygen` produces an Ed25519 keypair; private key saved locally with 0600 perms and never printed; public key printed for registry onboarding.
-- [ ] `upload` performs intent → PUT → finalize against a configurable base URL and prints the submission state.
-- [ ] `sign` signs an arbitrary request and prints headers, for debugging.
-- [ ] `test-vectors` subcommand regenerates `docs/agents/signing-test-vectors.json` deterministically from fixed inputs; #7 verifier tests consume the same file.
-- [ ] CLI never sends the private key anywhere; only signatures leave the machine.
-- [ ] Works against the local development server end-to-end once #8–#10 exist.
+- [ ] `keygen` creates an Ed25519 keypair with private mode 0600 and never prints private material.
+- [ ] `sign` produces canonical headers byte-for-byte compatible with #7.
+- [ ] `test-vectors verify` deterministically validates every field and signature in
+      `docs/agents/signing-test-vectors.json` using public inputs and keys only.
+- [ ] Signing tests use ephemeral Ed25519 keypairs; optional vector replacement
+      requires an explicit private-key path outside the repository and is not run in CI.
+- [ ] #7 verifier tests consume and verify every committed vector.
+- [ ] No private-key fixture, fixed seed, private-key derivation material, or
+      secret-scanner allowlist exception is committed.
+- [ ] Security review confirms CI receives only public vector material and no private
+      material is written to repository files, command output, or logs.
 
 ## Dependencies
 
-- #34 (skeleton), #7 (signing spec — the canonical string defined there is normative), #8, #10 (endpoints to call; CLI can be built against the spec before they land, using mocked responses in tests).
+- #34.
+- #7's frozen canonical-string design contract. #7 merge is not required;
+  #7's vector-consumption integration and ready PR consume #35S.
+
+[#56](https://github.com/Saber5656/Vynema/issues/56) owns upload/finalize/status
+and depends on #8, #10, and #18.
 
 ---
 
@@ -55,10 +71,9 @@ tools/agent-cli/
     cli.ts                # command dispatch (use `commander` ^12)
     keys.ts               # keygen/load/save (Ed25519 via node:crypto)
     signing.ts            # canonical string + signature (pure functions, no I/O)
-    client.ts             # HTTP flows: createIntent, putObject, finalize, getStatus
-    vectors.ts            # test vector generation
+    vectors.ts            # public vector validation + explicit local replacement
   test/
-    signing.test.ts       # asserts vectors file matches regenerated output
+    signing.test.ts       # ephemeral signing + public vector validation
 ```
 
 ### 2. Key handling (`keys.ts`)
@@ -80,7 +95,14 @@ signature = base64(ed25519_sign(privateKey, utf8(canonical)))
 - Headers emitted: `x-vynema-agent-id`, `x-vynema-key-id`, `x-vynema-timestamp`, `x-vynema-nonce`, `x-vynema-content-sha256`, `x-vynema-signature`.
 - Export pure function `buildSignedHeaders(input: {method, path, body, agentId, keyId, privateKey, now?, nonce?}): Record<string,string>` — `now`/`nonce` injectable for deterministic tests.
 
-### 4. Upload flow (`client.ts`, command `upload`)
+### Split child: #56 / #35U upload, finalize, and status CLI
+
+The following networked flow is canonical for
+[#56](https://github.com/Saber5656/Vynema/issues/56), not part of the #35S PR.
+#56 adds `client.ts`, upload/status command wiring, mocked contracts, and the
+live local transcript after #8, #10, and #18 merge.
+
+#### 4. Upload flow (`client.ts`, command `upload`)
 
 ```
 vynema-agent upload --base-url http://127.0.0.1:8787 --allow-insecure-http --agent-id <id> --key ~/.vynema/agent-key.pem \
@@ -100,27 +122,70 @@ All HTTP via global `fetch` (Node 22). Print the request id from `x-request-id` 
 
 ### 5. Test vectors (`vectors.ts`)
 
-- Fixed inputs (hardcoded): deterministic public test vector seed stored as non-secret bytes in `vectors.ts`; `vectors.ts` derives or mocks an Ed25519 test key at generation time and never commits a PKCS8 private key file. Use agentId `agt_testvector01`, timestamp `1750000000`, nonce `00000000-0000-4000-8000-000000000001`, and three request cases: empty body GET, JSON body POST, and finalize POST.
-- Output `docs/agents/signing-test-vectors.json`: array of `{name, method, path, body, timestamp, nonce, agentId, keyId, bodySha256, canonicalString, signature, publicKeySpkiBase64}`. The committed JSON must contain no private key material.
-- `test/signing.test.ts` regenerates and deep-equals against the committed file. Issue #7's verifier test imports the same JSON and must verify every vector.
+- Fixed **public** inputs: agentId `agt_testvector01`, timestamp `1750000000`,
+  nonce `00000000-0000-4000-8000-000000000001`, and three request cases:
+  empty body GET, JSON body POST, and finalize POST. Do not embed a signing seed,
+  private key, or any bytes from which a private key can be reconstructed.
+- Committed artifact: `docs/agents/signing-test-vectors.json`, an array of
+  `{name, method, path, body, timestamp, nonce, agentId, keyId, bodySha256,
+  canonicalString, signature, publicKeySpkiBase64}`. Every field is public; the
+  artifact contains no private-key material or derivation input.
+- `test-vectors verify` and `test/signing.test.ts` must, using the committed public
+  artifact only:
+  1. enforce the schema, unique names, fixed case order, and base64/hex encodings;
+  2. recompute `bodySha256`, `canonicalString`, and `keyId` from public inputs;
+  3. import `publicKeySpkiBase64` and verify each Ed25519 `signature`; and
+  4. fail mutation tests for a changed request field, hash, canonical byte,
+     public key, or signature.
+- Signing implementation tests generate an ephemeral Ed25519 keypair per test,
+  sign the same injected `now`/`nonce` input twice, require byte-identical
+  signatures, verify them with the ephemeral public key, and assert that private
+  material never appears in output or logs. The ephemeral key is not serialized
+  into a repository fixture.
+- Optional maintainer-only replacement uses
+  `test-vectors generate --private-key <external-path> --out <path>`. The private
+  key has no default, must resolve outside the repository checkout, is never
+  printed or copied, and is supplied manually from local storage. This command is
+  not run in CI. With the same external key and fixed public inputs it produces the
+  same public artifact; changing the vector key is an intentional reviewed
+  replacement. Only the public JSON output may be committed.
+- Issue #7's verifier test imports the same committed JSON and must verify every
+  vector independently.
 
 ### 6. Step-by-step order
 
-1. `signing.ts` + unit tests (pure, no network). 2. `keys.ts` + keygen command. 3. `vectors.ts` + committed vectors generated without any private-key fixture file. 4. `client.ts` against mocked `fetch` (vitest `vi.stubGlobal`). 5. `cli.ts` wiring + `docs/agents/reference-client.md`. Checkpoint after each step: `pnpm --filter @vynema/agent-cli test`.
+#35S: 1. `signing.ts` + ephemeral-key pure tests. 2. `keys.ts` + keygen. 3.
+`vectors.ts` public-only validation + committed public vectors. 4.
+`sign`/`test-vectors verify` command wiring, optional local replacement command,
+and signing docs. Checkpoint after each step:
+`pnpm --filter @vynema/agent-cli test`.
+
+#56 then adds `client.ts`, upload/status command wiring, mocked contracts, and the live local transcript after #8, #10, and #18 merge.
 
 ### 7. Security guardrails
 
-- Do not commit private keys, including test-only PKCS8 PEM fixtures. Generate or mock signing keys during test/vector generation so `scripts/security/scan-secrets.py` does not need an allowlist exception.
-- CLI refuses to run `upload` against a non-`https` base URL unless `--allow-insecure-http` is passed (local dev).
+- Do not commit private keys, test-only PKCS8 PEM fixtures, fixed signing seeds,
+  or any encoded/derived material sufficient to reconstruct a private key.
+- CI and default tests validate vectors using public inputs, public keys, and
+  signatures only. Signing tests use in-memory ephemeral keypairs. Vector
+  replacement accepts only an explicit private-key path outside the checkout and
+  must never print, copy, or persist that key.
+- `scripts/security/scan-secrets.py` must pass without an allowlist exception. A
+  passing scan complements but does not replace the no-private-material review.
+- #56's CLI refuses to run `upload` against a non-`https` base URL unless `--allow-insecure-http` is passed (local dev).
 
 ### 8. PR / evidence checklist
 
-- [ ] Vector regeneration test green; #7 cross-verification test green (or explicitly noted as pending until #7 merges).
-- [ ] Demo transcript of `upload` against local dev (once #8/#10 exist) or against mock.
-- [ ] Security note: vectors contain no private key material and require no secret-scanner allowlist entry.
+- [ ] Public-only vector validation and mutation tests green; #7
+      cross-verification test green (or explicitly noted as pending until #7 merges).
+- [ ] Ephemeral signing tests prove deterministic signing and verify that output and
+      logs contain no private material.
+- [ ] #35S security note: repository and CI contain no signing seed, private-key
+      fixture, or derivation material, and require no secret-scanner allowlist entry.
+- [ ] #56 evidence (not #35S): mocked command contracts, secret-safe output scan, and a live upload/finalize/status transcript after #8/#10/#18.
 
 ---
-Stable Issue Key: AIT-MVP-027
+Stable Issue Key: AIT-MVP-035
 Classification: MVP Blocking
-Dependencies: #34, #7, #8, #10
+Dependencies: #34, #7 design contract
 Labels: area/agent-api, area/testing, type/implementation, priority/p0, mvp-blocking

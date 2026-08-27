@@ -207,7 +207,7 @@ Finalize (fixtures: intent created via #8 route, media PUT through the developme
 | allowed `ftyp` prefix followed by arbitrary bytes, missing/truncated `moov`, or missing/empty `mdat` | 422 `container_invalid`; proves prefix spoofing cannot pass |
 | valid MP4 with `moov` after `mdat` | finalize succeeds; bounded box walk handles either legal order |
 | human session, no signature | 401 `AGENT_AUTH_FAILED` |
-| finalized video is not public | media route denies while `pending_review`; public API filter test lives in #15 |
+| finalized video is not public | status is `pending_review`; publication fields/counters are unset; same-intent BLOBs remain owned and readable through `StorageAdapter`; #54 owns the later anonymous route-denial assertion |
 
 Cleanup: stale/claimed-incomplete intent expired + released; orphan BLOBs
 deleted; rejected purge after 7 d (use injected `now`) atomically clears refs,
@@ -221,5 +221,5 @@ All time-dependent tests inject `now`; cleanup functions take `(env, nowMs)` par
 
 ### 5. Acceptance mapping & PR evidence
 
-- "Only owning active agent can finalize" → 404 + signature tests. "Fails for missing/expired/oversized/mismatched media" → table rows. "Creates reviewable submission but not public video" → happy-path assertions + denied media-route check. "Failed attempts audited with safe reasons" → `finalize.failed` rows. "Orphan cleanup idempotent & quota-ledger aware" → cleanup tests + accounting invariant. Duration and codec decoding are not promised; bounded container structure validation is implemented as §1a.
+- "Only owning active agent can finalize" → 404 + signature tests. "Fails for missing/expired/oversized/mismatched media" → table rows. "Creates reviewable submission but not public video" → `pending_review`, unset publication effects, and owned-adapter BLOB assertions; #54 owns anonymous route denial. "Failed attempts audited with safe reasons" → `finalize.failed` rows. "Orphan cleanup idempotent & quota-ledger aware" → cleanup tests + accounting invariant. Duration and codec decoding are not promised; bounded container structure validation is implemented as §1a.
 - PR evidence: test output, accounting invariant result, security impact note ("upload finalization boundary; object validation fail-closed").
