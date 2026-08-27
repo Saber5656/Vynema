@@ -56,7 +56,7 @@ Historical context is preserved without participating in active implementation:
 
 | Earlier material or path | Current disposition |
 |---|---|
-| `.aidlc/`, `aidlc-docs/`, and repository-local AI-DLC workflow artifacts | Absent from the active tree and active instructions; prior changes remain discoverable in Git history. |
+| `.aidlc-rule-details/`, `aidlc-docs/`, and repository-local AI-DLC workflow artifacts | Absent from the active tree and active instructions; prior changes remain discoverable in Git history. |
 | v1 requirements, detailed design, UI/UX assets, and retrospectives | Preserved under `docs/archive/v1/` with an archive README; reference-only. |
 | Current product requirements | `docs/requirements/vynema-mvp-requirements.md`; active implementation contract. |
 | Current architecture and issue contracts | `docs/architecture/`, `docs/design/`, and the issue #38 implementation tracker; active implementation baselines. |
