@@ -1,6 +1,6 @@
 # Vynema Project Status
 
-Last updated: 2026-06-28
+Last updated: 2026-08-27
 
 ## Overview
 
@@ -31,12 +31,13 @@ The current product direction is:
 
 | Workstream | Status | Notes |
 |---|---|---|
-| Public OSS baseline | In progress | README, LICENSE, SECURITY, CONTRIBUTING, CODEOWNERS, issue templates, and PR template have been prepared. |
+| Public OSS baseline | Current baseline exists | README, LICENSE, SECURITY, CONTRIBUTING, CODEOWNERS, issue templates, and PR template are present. |
 | Repository naming | Done | `Vynema` name is approved; repository-local publication audit notes are not required. |
-| Public content cleanup | In progress | AI-DLC, Claude-specific, temporary, project-local skill files, and v1-only helper scripts have been removed or archived from active public scope. |
-| GitHub hardening | In progress | A basic active ruleset exists. Phase 0 keeps required approving reviews at `0` because current AI review signals are advisory, not GitHub formal approvals. Security-sensitive PRs require owner sign-off by policy. Actions permissions API returned 403 with the current token. |
-| Current requirements | Current baseline exists | `docs/requirements/vynema-mvp-requirements.md` is the issue #1 implementation contract. Business review of launch wording is still required before launch readiness and should be recorded as a PR comment. |
-| Current architecture | Pending | Historical v1 design docs must be marked historical or replaced by current design docs. |
+| Public content cleanup | Done | AI-DLC workflow artifacts are absent from active task paths; v1 reference material is isolated under `docs/archive/v1/`, and history remains available in Git. |
+| GitHub hardening | Phase 0 active | Protected-branch rulesets, checks-only CI, secret scanning, and the security-sensitive PR sign-off policy are active. This is not a release or deployment gate. |
+| Current requirements | Current baseline exists | `docs/requirements/vynema-mvp-requirements.md` is the issue #1 implementation contract and links the current architecture and ADR index. |
+| Current architecture | Current baseline exists | `docs/architecture/vynema-architecture.md` and `docs/architecture/adr/` define local provider-independent development; production provider and migration decisions remain blocked on issue #42. |
+| Application foundation | Local skeleton exists | `docs/development.md` documents the Node/pnpm workspace, local API/SPA, SQLite bootstrap, and checks. |
 
 ## Current Product Assumptions
 
@@ -49,21 +50,24 @@ The current product direction is:
 | Cost model | Free-tier-bounded by default; paid services are not assumed for the MVP |
 | Release model | Explicit release gate such as tag, GitHub Release, or protected environment approval |
 
-## Historical Material
+## Historical Material And Cleanup Record
 
-The repository still contains v1 design material from the earlier `AI Theater` direction.
-That material may be useful for reference, but it is not the current implementation contract unless explicitly superseded.
+Historical context is preserved without participating in active implementation:
 
-Before public visibility, historical docs should be marked or moved so contributors can distinguish:
+| Earlier material or path | Current disposition |
+|---|---|
+| `.aidlc/`, `aidlc-docs/`, and repository-local AI-DLC workflow artifacts | Absent from the active tree and active instructions; prior changes remain discoverable in Git history. |
+| v1 requirements, detailed design, UI/UX assets, and retrospectives | Preserved under `docs/archive/v1/` with an archive README; reference-only. |
+| Current product requirements | `docs/requirements/vynema-mvp-requirements.md`; active implementation contract. |
+| Current architecture and issue contracts | `docs/architecture/`, `docs/design/`, and the issue #38 implementation tracker; active implementation baselines. |
 
-- current `Vynema` requirements;
-- current implementation architecture;
-- historical v1 planning artifacts.
+No archived v1 file is made normative by this status page, and no historical
+artifact is deleted as part of the v2 workflow cleanup.
 
 ## Next Actions
 
-1. Use `docs/requirements/vynema-mvp-requirements.md` as the current issue #1 requirements baseline.
-2. Finalize provider and quota decisions for issue #2.
-3. Remove or de-emphasize inactive AI-DLC workflow material for issue #3 while preserving historical context.
-4. Run full working-tree and git-history secret scans before launch readiness.
-5. Keep Phase 0 security contract evidence aligned with `docs/security/`.
+1. Follow `docs/design/issue-038-implementation-tracker.md` for dependency-ordered MVP implementation.
+2. Use `docs/development.md` for local setup and repository validation.
+3. Keep production provider selection, pricing, migration rehearsal, and deployment blocked on issue #42.
+4. Resolve launch-blocking security findings under issue #23 and retain the Phase 0 evidence contract in `docs/security/`.
+5. Run full working-tree and Git-history secret scans again before launch readiness; treat merge and release as separate gates.
