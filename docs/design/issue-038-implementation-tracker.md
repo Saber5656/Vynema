@@ -74,8 +74,8 @@ contract is fixed, but its vector-consumption integration and ready PR require
 
 ## Checklist (close when merged with evidence)
 
-- [ ] #2 ADRs approved & committed
-- [ ] #34 Application skeleton accepted
+- [x] #2 ADRs approved & committed
+- [x] #34 Application skeleton accepted
 - [ ] #4 local SQLite schema & migrations
 - [ ] #19 API platform (errors / request IDs / rate limits / CORS)
 - [ ] #22 Audit writer, action registry, and metadata redaction (#22A)
@@ -98,42 +98,44 @@ contract is fixed, but its vector-consumption integration and ready PR require
 - [ ] #13 Abuse reports / takedown / revocation
 - [ ] #17 Likes / saves / follows
 - [ ] #20 Test matrix (E2E + boundary map)
-- [ ] #21 Checks-only CI (deployment remains blocked on #42)
+- [x] #21 Checks-only CI (deployment remains blocked on #42)
 - [ ] #55 Admin audit, observability docs, runbooks, and ops status (#22B)
 - [ ] #29 Provider-independent IaC posture (provisioning blocked on #42)
 - [ ] #36 Policy docs accepted
 - [ ] #23 Security review closed (owner sign-off)
 - [ ] #24 Launch readiness & go/no-go
-- [ ] #1 / #3 closed with owner confirmation
+- [x] #1 requirements baseline accepted
+- [x] #3 active-workflow cleanup accepted by this close-out
 
-## Current implementation state (2026-07-17)
+## Current implementation state (2026-08-27)
 
-Merged artifacts and issue acceptance are separate gates. A merged partial
-artifact does not complete its issue while the required human or runtime
-evidence is still missing, so the checklist above remains unchanged.
+Merged artifacts and issue acceptance remain separate gates. The checked
+foundation rows below have complete acceptance evidence either on `main` or in
+the ordered close-out PRs. PR #61 must merge after PR #60 and PR #59, so every
+checked statement is true in the resulting `main` tree. Partial artifacts for
+the remaining issues stay unchecked.
 
 | Issue | Merged artifact | Remaining gate | Tracker state |
 |---|---|---|---|
-| #2 | PR #41 contains the ADR baseline | Exact owner formal sign-off is still missing | Open; unchecked |
-| #34 | PR #44 contains the application skeleton | Formal acceptance / owner sign-off is still missing | Open; unchecked |
+| #1 | The requirements baseline is on `main`; PR #60 adds the missing repository-relative ADR-index link | PR #60 merges before PR #61 | Accepted; checked |
+| #2 | PR #41 contains the reviewed ADR baseline | None; Issue closed as completed on 2026-08-27 | Closed; checked |
+| #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | This close-out PR merges after PR #60 and PR #59 | Accepted by this close-out; checked on merge |
+| #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
+| #34 | PR #44 contains the application skeleton; PR #59 aligns the accepted Node/pnpm contract across its design record | PR #59 merges before PR #61 | Accepted; checked |
 | #36 | PR #43 contains the public policy documents | Owner and counsel approval, plus #13 runtime moderation evidence, are still missing | Open; unchecked |
 
-The technical foundation for Wave 2 is present on `main`. The owner has
-authorized the #4 / #19 / #21 execution slice. Each lane now has its exact local
-task branch created from the same latest `origin/main` commit
-(`b53b32d8067fe7050c63128583ea24397c510b42`), has recorded a clean Branch Plan,
-and is in progress with implementation investigation. The #4 and #19 branches
-are local-only planning evidence and are not published for review; the #21
-branch is published as PR #48. These branch names are start evidence, not
-implementation completion or merge evidence. Issue #38's tracker-only lane is
-also in progress and exclusively owns this file for the slice.
+The technical foundation for the implementation waves is present on `main`.
+Issue #21 is complete without adding deployment, release, provider bindings, or
+cloud credentials; those operations remain blocked on #42. GitHub Issues and
+their accepted dependency order above are the live execution queue, rather
+than historical local branch names.
 
 | Lane | Current state | Publication gate |
 |---|---|---|
-| #4 local SQLite schema | In progress on local-only branch `codex/issue-4-sqlite-schema`; implementation investigation started | Ready PR may be created after implementation, tests, and required role reviews |
-| #19 API platform | In progress on local-only branch `codex/issue-19-api-platform`; implementation investigation started | Non-DB work may be committed locally, but no push or PR until #4 is merged and the real #4 migrations pass the integration test; do not stack on the #4 branch |
-| #21 checks-only CI | Published as PR #48 from `codex/issue-21-checks-only-ci`; implementation and hosted check evidence are available for review | Ready PR requires checks-only implementation, required role reviews, and actual green-run evidence; deployment remains blocked on #42 |
-| #38 tracker sync | In progress | This tracker file is the lane's only repository-owned path |
+| #4 local SQLite schema | Open implementation issue | Ready PR requires implementation, tests, and required role reviews |
+| #19 API platform | Open implementation issue | Shared-surface integration still follows the dependency gates above |
+| #21 checks-only CI | PR #58 merged; Issue closed | Deployment remains blocked on #42 |
+| #38 tracker sync | Updated by the Issue #3 close-out PR | This status synchronization does not claim completion of the remaining implementation waves |
 
 ### Approved split gates
 
