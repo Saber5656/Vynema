@@ -18,6 +18,9 @@ const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 export const PRIVATE_KEY_FILENAME = "agent-key.pem";
 export const PUBLIC_KEY_FILENAME = "agent-key.pub.pem";
 
+const WINDOWS_PRIVATE_KEY_ERROR =
+  "Private-key operations are unavailable on Windows because restrictive ACLs cannot be established and verified.";
+
 export interface PublicKeyIdentity {
   keyId: string;
   publicKeySpkiBase64: string;
@@ -134,7 +137,15 @@ export function assertPathOutsideRepository(
   }
 }
 
+function assertPrivateKeyPlatform(): void {
+  if (process.platform === "win32") {
+    throw new Error(WINDOWS_PRIVATE_KEY_ERROR);
+  }
+}
+
 export function loadEd25519PrivateKey(privateKeyPath: string): KeyObject {
+  assertPrivateKeyPlatform();
+
   let resolvedPath: string;
   try {
     resolvedPath = realpathSync(privateKeyPath);
@@ -148,7 +159,7 @@ export function loadEd25519PrivateKey(privateKeyPath: string): KeyObject {
     throw new Error("Private key path must reference a regular file.");
   }
 
-  if (process.platform !== "win32" && (file.mode & 0o077) !== 0) {
+  if ((file.mode & 0o077) !== 0) {
     throw new Error(
       "Private key permissions must not grant group or other access (use mode 0600).",
     );
@@ -169,6 +180,8 @@ export function generateAgentKeyFiles(
   outputDirectory: string,
   repositoryRoot?: string,
 ): GeneratedAgentKeyPair {
+  assertPrivateKeyPlatform();
+
   const containingRepository = findRepositoryRoot(outputDirectory);
   if (containingRepository) {
     assertPathOutsideRepository(outputDirectory, containingRepository, "Key output directory");
@@ -187,12 +200,10 @@ export function generateAgentKeyFiles(
     throw new Error("Key output path must be a directory.");
   }
 
-  if (process.platform !== "win32") {
-    if (directoryExisted && (directory.mode & 0o077) !== 0) {
-      throw new Error("Key output directory must not grant group or other access (use mode 0700).");
-    }
-    chmodSync(resolvedDirectory, 0o700);
+  if (directoryExisted && (directory.mode & 0o077) !== 0) {
+    throw new Error("Key output directory must not grant group or other access (use mode 0700).");
   }
+  chmodSync(resolvedDirectory, 0o700);
 
   const privateKeyPath = join(resolvedDirectory, PRIVATE_KEY_FILENAME);
   const publicKeyPath = join(resolvedDirectory, PUBLIC_KEY_FILENAME);
@@ -213,9 +224,7 @@ export function generateAgentKeyFiles(
     throw error;
   }
 
-  if (process.platform !== "win32") {
-    chmodSync(privateKeyPath, 0o600);
-  }
+  chmodSync(privateKeyPath, 0o600);
 
   return {
     ...getPublicKeyIdentity(publicKey),

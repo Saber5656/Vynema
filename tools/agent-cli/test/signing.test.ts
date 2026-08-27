@@ -261,6 +261,29 @@ describe("Ed25519 key handling and CLI", () => {
     expect(createHash("sha256").update(readFileSync(privateKeyPath)).digest("hex")).toBe(before);
   });
 
+  it("fails closed on Windows before accessing or creating private-key files", () => {
+    const temporaryDirectory = makeTemporaryDirectory("windows-acl");
+    const ephemeral = writeEphemeralPrivateKey(temporaryDirectory);
+    const outputDirectory = join(temporaryDirectory, "windows-keys");
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform");
+    if (!platformDescriptor) {
+      throw new Error("Expected process.platform descriptor.");
+    }
+
+    Object.defineProperty(process, "platform", { ...platformDescriptor, value: "win32" });
+    try {
+      expect(() => loadEd25519PrivateKey(ephemeral.path)).toThrow(
+        /restrictive ACLs cannot be established and verified/,
+      );
+      expect(() => generateAgentKeyFiles(outputDirectory)).toThrow(
+        /restrictive ACLs cannot be established and verified/,
+      );
+      expect(existsSync(outputDirectory)).toBe(false);
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  });
+
   it("sign emits verifiable canonical headers without private material", async () => {
     const temporaryDirectory = makeTemporaryDirectory("sign");
     const ephemeral = writeEphemeralPrivateKey(temporaryDirectory);
