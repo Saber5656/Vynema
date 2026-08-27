@@ -15,18 +15,19 @@ Meta tracker for the Vynema MVP implementation. Repository-local canonical
 implementation designs are indexed by the [`docs/design/` README](README.md);
 for those issues, GitHub issue bodies carry derived summaries, acceptance
 criteria, dependencies, and links back to the design files. Four tracker entries
-deliberately use other authorities:
+deliberately use the following authority/source combinations:
 
 - #23 combines its GitHub acceptance criteria with the normative
   [`docs/security/` baseline](../security/README.md).
 - #24 is the GitHub launch checklist and has no separate design file.
-- #42 combines its GitHub decision gate with
-  [`provider-decisions.md`](../architecture/provider-decisions.md) and the ADRs.
+- #42 uses its GitHub decision gate and the ADRs as authorities;
+  [`provider-decisions.md`](../architecture/provider-decisions.md) is archived
+  research and handoff context only.
 - #46 is the GitHub-scoped local seed-fixture follow-up to #4 and #35S.
 
 Read order for any implementer: this tracker →
 [#2 ADRs](../architecture/adr/README.md) → the design index, or the exception
-source named above when the affected issue has no design file.
+source set named above when the affected issue has no design file.
 
 **Rules of the road**
 
