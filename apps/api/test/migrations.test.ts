@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -296,6 +297,51 @@ describe("applyMigrations", () => {
     } finally {
       active.close();
     }
+  });
+
+  it("rejects a restore candidate with orphaned foreign-key rows", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const orphanedPath = join(fixtureDirectory, "orphaned.sqlite");
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_relations.sql"),
+      [
+        "CREATE TABLE parent_rows (id INTEGER PRIMARY KEY);",
+        "CREATE TABLE child_rows (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parent_rows(id));",
+        "-- recovery: restore backup",
+      ].join("\n"),
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+    fixture.database.prepare("INSERT INTO parent_rows (id) VALUES (1)").run();
+    fixture.database.close();
+    database = undefined;
+
+    copyFileSync(databasePath, orphanedPath);
+    const orphaned = openDatabase(orphanedPath);
+    try {
+      orphaned.exec("PRAGMA foreign_keys = OFF");
+      orphaned.prepare("INSERT INTO child_rows (id, parent_id) VALUES (1, 999)").run();
+      orphaned.exec("PRAGMA foreign_keys = ON");
+    } finally {
+      orphaned.close();
+    }
+
+    const activeBytesBefore = readFileSync(databasePath);
+    await expect(
+      restoreDatabaseFromBackup({
+        activeDatabasePath: databasePath,
+        backupPath: orphanedPath,
+        migrationsDirectory: fixture.migrationsDirectory,
+      }),
+    ).rejects.toThrow("foreign-key consistency check failed");
+    expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+    expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual([]);
   });
 
   it("fails closed when foreign keys or recovery guidance are absent", () => {

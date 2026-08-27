@@ -38,12 +38,26 @@ type IntegrityCheckPragma = {
   integrity_check: string;
 };
 
+type ForeignKeyViolation = {
+  table: string;
+  rowid: number | null;
+  parent: string;
+  fkid: number;
+};
+
 export function assertDatabaseIntegrity(database: Database): void {
   const result = database.prepare("PRAGMA integrity_check(1)").get() as
     IntegrityCheckPragma | undefined;
 
   if (result?.integrity_check !== "ok") {
     throw new Error("SQLite integrity check failed.");
+  }
+
+  const foreignKeyViolation = database.prepare("PRAGMA foreign_key_check").get() as
+    ForeignKeyViolation | undefined;
+
+  if (foreignKeyViolation) {
+    throw new Error("SQLite foreign-key consistency check failed.");
   }
 }
 
