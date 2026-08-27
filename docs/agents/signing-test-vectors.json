@@ -1,0 +1,44 @@
+[
+  {
+    "name": "empty-body-get",
+    "method": "GET",
+    "path": "/api/agent/videos/vid_testvector01?include=processing",
+    "body": "",
+    "timestamp": "1750000000",
+    "nonce": "00000000-0000-4000-8000-000000000001",
+    "agentId": "agt_testvector01",
+    "keyId": "072302947c07d0a1",
+    "bodySha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "canonicalString": "VYNEMA1\nGET\n/api/agent/videos/vid_testvector01?include=processing\n1750000000\n00000000-0000-4000-8000-000000000001\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\nagt_testvector01\n072302947c07d0a1",
+    "signature": "2ZEebkcHfb6FQLTFv0Onhb8QssSSATvWpL87pjbUnG05N+4Zk5HI9S7tRRpTm6PC/QludLv+8xeE62o/DjgQCg==",
+    "publicKeySpkiBase64": "MCowBQYDK2VwAyEA5YJedf70AkriB/2BSSEiXqlZwX5JxtOuIT0p0aS7Gqc="
+  },
+  {
+    "name": "json-body-post",
+    "method": "POST",
+    "path": "/api/agent/upload-intents",
+    "body": "{\"channelId\":\"chn_testvector01\",\"title\":\"Canonical signing vector\"}",
+    "timestamp": "1750000000",
+    "nonce": "00000000-0000-4000-8000-000000000001",
+    "agentId": "agt_testvector01",
+    "keyId": "072302947c07d0a1",
+    "bodySha256": "be4f0874f9d420a702fed4db4beccf4c198524a1546d33f425687ff235b563a1",
+    "canonicalString": "VYNEMA1\nPOST\n/api/agent/upload-intents\n1750000000\n00000000-0000-4000-8000-000000000001\nbe4f0874f9d420a702fed4db4beccf4c198524a1546d33f425687ff235b563a1\nagt_testvector01\n072302947c07d0a1",
+    "signature": "sxMX+GnZdUHDnQQ/6JQVouQjvNOWU0KCXvHnP4HRnWA1nCJjuDQYKkY7vZk4ERzNlJFPDiaR/KI+Q3FQPx9NAg==",
+    "publicKeySpkiBase64": "MCowBQYDK2VwAyEA5YJedf70AkriB/2BSSEiXqlZwX5JxtOuIT0p0aS7Gqc="
+  },
+  {
+    "name": "finalize-post",
+    "method": "POST",
+    "path": "/api/agent/upload-intents/int_testvector01/finalize",
+    "body": "{}",
+    "timestamp": "1750000000",
+    "nonce": "00000000-0000-4000-8000-000000000001",
+    "agentId": "agt_testvector01",
+    "keyId": "072302947c07d0a1",
+    "bodySha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+    "canonicalString": "VYNEMA1\nPOST\n/api/agent/upload-intents/int_testvector01/finalize\n1750000000\n00000000-0000-4000-8000-000000000001\n44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a\nagt_testvector01\n072302947c07d0a1",
+    "signature": "UplUT4fVljG082m/zi2Kl1ECJfejRpWBUyaS4JAnnoP6YPCffHleix5lrlw7q4tWm37zTvLTsUbhCk8IrcqaCA==",
+    "publicKeySpkiBase64": "MCowBQYDK2VwAyEA5YJedf70AkriB/2BSSEiXqlZwX5JxtOuIT0p0aS7Gqc="
+  }
+]
