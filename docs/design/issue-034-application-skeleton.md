@@ -89,8 +89,8 @@ out-of-scope boundary, and acceptance criteria before expanding this PR.
 | Node                   | `>=22.13 <23`, `.nvmrc` = `22`. Node 22.13+ is required because `node:sqlite` runs without an experimental flag from that release.                                                                      |
 | Language               | TypeScript 5.x, `strict: true`, `noUncheckedIndexedAccess: true` everywhere.                                                                                                                            |
 | API                    | `hono@^4` with `@hono/node-server@^2`. Hono handlers use Web-standard request/response APIs.                                                                                                            |
-| Frontend               | `vite@^5`, `@vitejs/plugin-react@^4`, React/ReactDOM `^18`, `react-router-dom@^6`, and `@tanstack/react-query@^5`.                                                                                      |
-| Tests                  | `vitest@^2`; API tests use Node and temporary built-in SQLite databases; web tests use `happy-dom`. No storage adapter is created or tested here.                                                       |
+| Frontend               | `vite@^6.4.3`, `@vitejs/plugin-react@^4.7.0`, React/ReactDOM `^18.3.1`, `react-router-dom@^7.0.0`, and `@tanstack/react-query@^5.101.2`.                                                                |
+| Tests                  | `vitest@^3.2.6`; API tests use Node and temporary built-in SQLite databases; web tests use `happy-dom@^20.10.6`. No storage adapter is created or tested here.                                          |
 | Static analysis        | ESLint `^9` flat config with `typescript-eslint@^8`, Prettier `^3`, `@types/node@^22`, `@types/react@^18`, and `@types/react-dom@^18`.                                                                  |
 | SQLite                 | Node built-in `node:sqlite` `DatabaseSync`; no third-party SQLite driver.                                                                                                                               |
 | Single origin          | One local process serves `/api/*` and the built SPA. No CORS is needed for the first-party web app. Media routes are added by #9, not this issue.                                                       |
@@ -232,9 +232,9 @@ export function openDatabase(path: string): Database;
 `openDatabase` creates the database's parent directory, opens `DatabaseSync`,
 executes `PRAGMA foreign_keys=ON`, reads the pragma back, and fails closed if it
 is not enabled. The constructor is loaded from the exact built-in `node:sqlite`
-module through Node's `createRequire(import.meta.url)`; this keeps Vitest 2 /
-Vite 5 from treating the newer built-in name as a file while providing no
-third-party driver or fallback. `Env` uses this `Database` type and does not
+module through Node's `createRequire(import.meta.url)`; this keeps the
+Vite/Vitest toolchain from treating the built-in name as a file while providing
+no third-party driver or fallback. `Env` uses this `Database` type and does not
 contain storage:
 
 ```ts
