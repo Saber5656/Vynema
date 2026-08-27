@@ -38,6 +38,12 @@ The private key is never printed, and existing key files are never overwritten. 
 file outside the checkout, do not attach it to issues or logs, and do not send it to Vynema. Only
 the public SPKI base64 and derived key ID are registered with the platform.
 
+The current reference CLI fails closed on Windows before reading or creating private-key files.
+Node's POSIX `mode` option cannot establish or verify a restrictive Windows ACL, so `keygen`,
+`sign`, and `test-vectors generate` are unavailable there until an ACL implementation can prove
+exclusive key access. Public-only `test-vectors verify` remains available. Run private-key commands
+on a supported POSIX system rather than weakening the key-confidentiality check.
+
 `keyId` is the first 16 lowercase hexadecimal characters of SHA-256 over the raw 32-byte Ed25519
 public key. It is not hashed over the 44-byte SPKI wrapper. A canonical Ed25519 SPKI is exactly the
 12-byte prefix `302a300506032b6570032100` followed by those 32 raw public-key bytes.
