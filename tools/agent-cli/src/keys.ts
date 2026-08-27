@@ -98,7 +98,7 @@ function resolveThroughExistingAncestor(candidatePath: string): string {
 }
 
 export function findRepositoryRoot(startPath: string): string | undefined {
-  let current = resolve(startPath);
+  let current = resolveThroughExistingAncestor(startPath);
 
   if (existsSync(current) && !statSync(current).isDirectory()) {
     current = dirname(current);

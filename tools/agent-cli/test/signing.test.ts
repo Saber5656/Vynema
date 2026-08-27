@@ -1,5 +1,16 @@
 import { createHash, generateKeyPairSync, verify as verifyBytes } from "node:crypto";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -9,6 +20,8 @@ import { runCli, type CliIo } from "../src/cli.js";
 import {
   assertPathOutsideRepository,
   deriveKeyIdFromSpki,
+  findRepositoryRoot,
+  generateAgentKeyFiles,
   getPublicKeyIdentity,
   getPublicKeyIdentityFromPrivateKey,
   importEd25519PublicKey,
@@ -388,6 +401,23 @@ describe("Ed25519 key handling and CLI", () => {
         "Vector private key",
       );
     }).toThrow(/outside the repository checkout/);
+  });
+
+  it("resolves a symlinked key destination before repository containment lookup", () => {
+    const temporaryDirectory = makeTemporaryDirectory("symlinked-key-destination");
+    const fakeRepository = join(temporaryDirectory, "fake-repository");
+    const repositoryTarget = join(fakeRepository, "nested", "key-output");
+    const externalDirectory = join(temporaryDirectory, "external");
+    const symlinkPath = join(externalDirectory, "repository-output");
+    mkdirSync(join(fakeRepository, ".git"), { recursive: true });
+    mkdirSync(repositoryTarget, { recursive: true });
+    mkdirSync(externalDirectory);
+    symlinkSync(repositoryTarget, symlinkPath, "dir");
+
+    expect(findRepositoryRoot(symlinkPath)).toBe(realpathSync(fakeRepository));
+    expect(() => generateAgentKeyFiles(symlinkPath)).toThrow(/outside the repository checkout/);
+    expect(existsSync(join(repositoryTarget, PRIVATE_KEY_FILENAME))).toBe(false);
+    expect(existsSync(join(repositoryTarget, PUBLIC_KEY_FILENAME))).toBe(false);
   });
 });
 
