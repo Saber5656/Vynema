@@ -28,16 +28,27 @@ jobs:
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22.13.1
+          package-manager-cache: false
 
       - name: Enable repository-pinned pnpm
         shell: bash
         run: |
           set -euo pipefail
 
+          readonly expected_corepack_version="0.34.7"
+          readonly expected_corepack_sha256="7f7f581a5fae7946dce393c3ebd957e7449e73bb9b5bb219c566fa83d23412f4"
           readonly expected_package_manager="pnpm@10.34.5"
           readonly declared_package_manager="$(node -p "require('./package.json').packageManager")"
+          readonly corepack_archive="${RUNNER_TEMP}/corepack.tgz"
+          readonly corepack_url="https://github.com/nodejs/corepack/releases/download/v${expected_corepack_version}/corepack.tgz"
 
           test "${declared_package_manager}" = "${expected_package_manager}"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error --retry 3 \
+            "${corepack_url}" --output "${corepack_archive}"
+          printf '%s  %s\n' "${expected_corepack_sha256}" "${corepack_archive}" \
+            | sha256sum --check --strict
+          npm install --global --ignore-scripts --no-audit --no-fund "${corepack_archive}"
+          test "$(corepack --version)" = "${expected_corepack_version}"
           corepack enable
           corepack prepare "${expected_package_manager}" --activate
           test "$(pnpm --version)" = "10.34.5"
