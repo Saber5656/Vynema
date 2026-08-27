@@ -125,10 +125,11 @@ contract is fixed, but its vector-consumption integration and ready PR require
 ## Current implementation state (2026-08-27)
 
 Merged artifacts and issue acceptance remain separate gates. The checked
-foundation rows below have complete acceptance evidence either on `main` or in
-this close-out PR. PR #61 is based on `main` after merged PR #60 and PR #59, so
-every checked statement is true when this PR merges. Partial artifacts for the
-remaining issues stay unchecked.
+foundation rows below have complete acceptance evidence either on the target
+branch `main` or in this close-out PR. At this close-out's merge gate, the target
+branch already contains merged PR #60 and PR #59, so every checked statement is
+true in the clean merge candidate. Partial artifacts for the remaining issues
+stay unchecked.
 
 | Issue | Merged artifact | Remaining gate | Tracker state |
 |---|---|---|---|
