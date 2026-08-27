@@ -14,6 +14,8 @@ Related current baselines:
 
 - `docs/architecture/vynema-architecture.md` - current revised v2 design
   for the MVP baseline
+- `docs/architecture/adr/README.md` - accepted and amended architecture
+  decision index
 - `docs/security/README.md`
 - `docs/security/vynema-threat-model.md`
 - `docs/security/security-contract.md`
