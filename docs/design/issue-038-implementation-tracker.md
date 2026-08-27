@@ -116,17 +116,17 @@ contract is fixed, but its vector-consumption integration and ready PR require
 
 Merged artifacts and issue acceptance remain separate gates. The checked
 foundation rows below have complete acceptance evidence either on `main` or in
-the ordered close-out PRs. PR #61 must merge after PR #60 and PR #59, so every
-checked statement is true in the resulting `main` tree. Partial artifacts for
-the remaining issues stay unchecked.
+this close-out PR. PR #61 is based on `main` after merged PR #60 and PR #59, so
+every checked statement is true when this PR merges. Partial artifacts for the
+remaining issues stay unchecked.
 
 | Issue | Merged artifact | Remaining gate | Tracker state |
 |---|---|---|---|
-| #1 | The requirements baseline is on `main`; PR #60 adds the missing repository-relative ADR-index link | PR #60 merges before PR #61 | Accepted; checked |
+| #1 | The requirements baseline and PR #60's repository-relative ADR-index link are on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #2 | PR #41 contains the reviewed ADR baseline | None; Issue closed as completed on 2026-08-27 | Closed; checked |
-| #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | This close-out PR merges after PR #60 and PR #59 | Accepted by this close-out; checked on merge |
+| #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | PR #60 and PR #59 prerequisites are satisfied; this close-out PR itself must merge | Accepted by this close-out; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
-| #34 | PR #44 contains the application skeleton; PR #59 aligns the accepted Node/pnpm contract across its design record | PR #59 merges before PR #61 | Accepted; checked |
+| #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #36 | PR #43 contains the public policy documents | Owner and counsel approval, plus #13 runtime moderation evidence, are still missing | Open; unchecked |
 
 The technical foundation for the implementation waves is present on `main`.
