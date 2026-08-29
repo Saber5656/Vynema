@@ -412,6 +412,77 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("restores committed rows from a live WAL source snapshot", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const walSourcePath = join(fixtureDirectory, "wal-source.sqlite");
+    const staleMainCopyPath = join(fixtureDirectory, "wal-main-only.sqlite");
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_probe.sql"),
+      "CREATE TABLE restore_probe (value TEXT NOT NULL); -- recovery: restore backup",
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+    fixture.database.prepare("INSERT INTO restore_probe (value) VALUES (?)").run("active-data");
+    fixture.database.close();
+    database = undefined;
+
+    const walSource = openDatabase(walSourcePath);
+
+    try {
+      expect(applyMigrations(walSource, fixture.migrationsDirectory)).toEqual([1]);
+      expect(walSource.prepare("PRAGMA journal_mode = WAL").get()).toEqual({
+        journal_mode: "wal",
+      });
+      walSource.exec("PRAGMA wal_autocheckpoint = 0");
+      walSource.prepare("INSERT INTO restore_probe (value) VALUES (?)").run("wal-data");
+      expect(existsSync(`${walSourcePath}-wal`)).toBe(true);
+      expect(walSource.prepare("SELECT value FROM restore_probe").all()).toEqual([
+        { value: "wal-data" },
+      ]);
+
+      copyFileSync(walSourcePath, staleMainCopyPath);
+      const staleMainCopy = openDatabase(staleMainCopyPath);
+      try {
+        expect(staleMainCopy.prepare("SELECT value FROM restore_probe").all()).toEqual([]);
+      } finally {
+        staleMainCopy.close();
+      }
+
+      const result = await restoreDatabaseFromBackup({
+        activeDatabasePath: databasePath,
+        backupPath: walSourcePath,
+        migrationsDirectory: fixture.migrationsDirectory,
+      });
+      expect(result.migrationStatus).toMatchObject({
+        currentVersion: 1,
+        latestVersion: 1,
+        pendingMigrations: [],
+      });
+      expect(result.safetyBackupPath).not.toBeNull();
+      expect(existsSync(result.safetyBackupPath ?? "")).toBe(true);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+    } finally {
+      walSource.close();
+    }
+
+    const restored = openDatabase(databasePath);
+    try {
+      expect(restored.prepare("SELECT value FROM restore_probe").all()).toEqual([
+        { value: "wal-data" },
+      ]);
+    } finally {
+      restored.close();
+    }
+  });
+
   it("rejects a restore candidate with orphaned foreign-key rows", async () => {
     const fixture = createFixture();
     const fixtureDirectory = temporaryDirectory;

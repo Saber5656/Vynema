@@ -115,9 +115,10 @@ pnpm --filter @vynema/api db:backup
 
 Restore a backup. Before touching the active database, the command verifies
 SQLite integrity plus the repository migration version, filenames, and
-checksums. It validates the copied restore candidate a second time, creates a
-`before-restore` safety backup of the current database, and only then performs
-the replacement:
+checksums. It creates the installable candidate with SQLite snapshot semantics
+so committed rows in a live WAL source are included, validates that exact
+snapshot, creates a `before-restore` safety backup of the current database,
+revalidates the candidate, and only then performs the replacement:
 
 ```sh
 pnpm --filter @vynema/api db:restore -- .local/backups/<backup-file>.bak
