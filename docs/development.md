@@ -131,8 +131,23 @@ unrelated SQLite database from being accepted merely because its
 `user_version` is still zero. The same check runs both before the safety
 backup and against the copied candidate.
 For the Vynema schema, every restored `published` or `taken_down` video must
-also retain at least one `moderation_reviews` row with `decision = 'approved'`;
-otherwise restore fails before a safety backup or active-database replacement.
+belong to an intent finalized no later than publication and retain at least one
+`moderation_reviews` row with `decision = 'approved'` whose `created_at` is no
+later than the video's `published_at`; otherwise restore fails before a safety
+backup or active-database replacement. This is historical publication
+evidence: a later reviewer role or account-status change does not invalidate an
+approval that was valid when publication occurred. Restore also requires
+`published_at >= videos.created_at` and, for a taken-down video,
+`taken_down_at >= published_at`.
+Restore also verifies the upload claim/BLOB/use/finalize timeline, finalized
+video and any declared-thumbnail linkage, duration/provenance equality, media
+ownership, and nonnegative rate-limit state. Canonical cleanup remains
+restorable: a rejected finalized video may have its media reference cleared,
+and an expired capability may be absent while a finalized video still retains
+its verified BLOB. A
+restore source that is the active database through the same path, a symlink,
+or a hard link is rejected before any backup or temporary restore file is
+created.
 Restore also verifies search-index content, not only its DDL: portable mode
 requires exact row/title/description parity with `videos`, while FTS5 runs its
 external-content `integrity-check` against `videos`. A stale index fails before
@@ -164,6 +179,11 @@ it rather than continuing outside the intended transaction.
 Never edit, rename, delete, or roll back an applied migration. To recover from a
 failed local migration, either restore the printed pre-migration backup,
 correct an unapplied SQL file, or add the next numbered fix-forward migration.
+`0003_guard_reviewed_invariants.sql` is such a fix-forward migration: it leaves
+`0001` and `0002` untouched while adding the reviewed upload timeline,
+provenance, finalization, one-way publication/takedown state machine, immutable
+publication approval/timestamps, finalized duration/declared-thumbnail
+evidence, and rate-limit guards.
 Every migration must contain a `-- recovery:` note. Generated backup collision
 files and restore-temporary files are ignored by Git. Backups are built and
 validated in an exclusively owned temporary directory, then atomically linked

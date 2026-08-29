@@ -53,6 +53,9 @@ function insertIntent(
   options: {
     agentId?: string;
     channelId?: string;
+    createdAt?: number;
+    expiresAt?: number;
+    provenanceJson?: string;
     thumbnailMime?: "image/jpeg" | "image/png";
   } = {},
 ): void {
@@ -82,9 +85,9 @@ function insertIntent(
       "video/mp4",
       60,
       "Schema Test Video",
-      "{}",
-      1_000,
-      100_000,
+      options.provenanceJson ?? "{}",
+      options.createdAt ?? 1_000,
+      options.expiresAt ?? 100_000,
     );
 }
 
@@ -92,6 +95,11 @@ function insertCapability(
   intentId: string,
   kind: "video" | "thumbnail",
   capabilityId: string,
+  options: {
+    claimedAt?: number | null;
+    createdAt?: number;
+    expiresAt?: number;
+  } = {},
 ): void {
   const isVideo = kind === "video";
 
@@ -112,15 +120,23 @@ function insertCapability(
       isVideo ? VIDEO_BYTES.length : THUMBNAIL_BYTES.length,
       isVideo ? VIDEO_HASH : THUMBNAIL_HASH,
       isVideo ? "video/mp4" : "image/png",
-      90_000,
-      1_100,
+      options.expiresAt ?? 90_000,
+      options.createdAt ?? 1_100,
     );
-  database
-    .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
-    .run(1_200, capabilityId);
+  const claimedAt = options.claimedAt === undefined ? 1_200 : options.claimedAt;
+  if (claimedAt !== null) {
+    database
+      .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+      .run(claimedAt, capabilityId);
+  }
 }
 
-function insertBlob(intentId: string, kind: "video" | "thumbnail", blobId: string): void {
+function insertBlob(
+  intentId: string,
+  kind: "video" | "thumbnail",
+  blobId: string,
+  createdAt = 1_300,
+): void {
   const isVideo = kind === "video";
 
   database
@@ -139,7 +155,7 @@ function insertBlob(intentId: string, kind: "video" | "thumbnail", blobId: strin
       isVideo ? VIDEO_BYTES.length : THUMBNAIL_BYTES.length,
       isVideo ? VIDEO_HASH : THUMBNAIL_HASH,
       isVideo ? "video/mp4" : "image/png",
-      1_300,
+      createdAt,
     );
 }
 
@@ -150,11 +166,13 @@ function insertPendingVideo(
     agentId?: string;
     channelId?: string;
     title?: string;
+    durationSeconds?: number;
     videoBlobId?: string | null;
     thumbnailBlobId?: string | null;
     sizeBytes?: number;
     sha256?: string;
     aiGenerated?: number;
+    provenanceJson?: string;
   } = {},
 ): void {
   database
@@ -172,11 +190,11 @@ function insertPendingVideo(
       options.agentId ?? "agt_111111111111",
       options.channelId ?? "chn_11111111-1111-4111-8111-111111111111",
       options.title ?? "Initial titletoken",
-      60,
+      options.durationSeconds ?? 60,
       options.sizeBytes ?? VIDEO_BYTES.length,
       options.sha256 ?? VIDEO_HASH,
       options.aiGenerated ?? 1,
-      "{}",
+      options.provenanceJson ?? "{}",
       options.videoBlobId ?? null,
       options.thumbnailBlobId ?? null,
       2_000,
@@ -199,7 +217,7 @@ function findSearchRows(target: Database, token: string): unknown[] {
 beforeEach(() => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "vynema-schema-"));
   database = openDatabase(join(temporaryDirectory, "database.sqlite"));
-  expect(applyMigrations(database, migrationsDirectory)).toEqual([1, 2]);
+  expect(applyMigrations(database, migrationsDirectory)).toEqual([1, 2, 3]);
 });
 
 afterEach(() => {
@@ -214,10 +232,10 @@ describe("canonical schema", () => {
       foreign_keys: 1,
     });
     expect(database.prepare("PRAGMA user_version").get()).toEqual({
-      user_version: 2,
+      user_version: 3,
     });
     expect(() => {
-      assertCanonicalMigratedSchema(database, migrationsDirectory, 2);
+      assertCanonicalMigratedSchema(database, migrationsDirectory, 3);
     }).not.toThrow();
 
     const tables = (
@@ -1143,6 +1161,295 @@ describe("canonical schema", () => {
     ).toBeUndefined();
   });
 
+  it("orders upload authorization evidence and keeps rate-limit state nonnegative", () => {
+    insertAgentChannel();
+
+    insertIntent("int_claim_before_capability");
+    insertCapability("int_claim_before_capability", "video", "cap_claim_before_capability", {
+      claimedAt: null,
+      createdAt: 1_300,
+    });
+    expect(() =>
+      database
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+        .run(1_200, "cap_claim_before_capability"),
+    ).toThrow("upload capability claim requires a live intent");
+
+    insertIntent("int_claim_after_capability_expiry");
+    insertCapability(
+      "int_claim_after_capability_expiry",
+      "video",
+      "cap_claim_after_capability_expiry",
+      { claimedAt: null, expiresAt: 1_150 },
+    );
+    expect(() =>
+      database
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+        .run(1_200, "cap_claim_after_capability_expiry"),
+    ).toThrow("upload capability claim requires a live intent");
+
+    insertIntent("int_claim_after_intent_expiry", { expiresAt: 1_150 });
+    insertCapability("int_claim_after_intent_expiry", "video", "cap_claim_after_intent_expiry", {
+      claimedAt: null,
+    });
+    expect(() =>
+      database
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+        .run(1_200, "cap_claim_after_intent_expiry"),
+    ).toThrow("upload capability claim requires a live intent");
+
+    const intentId = "int_ordered_upload";
+    const capabilityId = "cap_ordered_upload";
+    insertIntent(intentId);
+    insertCapability(intentId, "video", capabilityId);
+    expect(() => {
+      insertBlob(intentId, "video", "blob_before_claim", 1_199);
+    }).toThrow("media blob timestamp is outside its upload authorization");
+    expect(() => {
+      insertBlob(intentId, "video", "blob_after_expiry", 90_001);
+    }).toThrow("media blob timestamp is outside its upload authorization");
+    insertBlob(intentId, "video", "blob_ordered_upload");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+        .run(1_250, capabilityId),
+    ).toThrow("completed capability requires ordered media evidence");
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, capabilityId);
+
+    expect(() =>
+      database
+        .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+        .run("comment:negative-window", -1, 0),
+    ).toThrow("rate limit state must be nonnegative");
+    expect(() =>
+      database
+        .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+        .run("comment:negative-count", 1_000, -1),
+    ).toThrow("rate limit state must be nonnegative");
+    database
+      .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+      .run("comment:valid", 1_000, 1);
+    expect(() =>
+      database
+        .prepare("UPDATE rate_limits SET count = -1 WHERE key = ? AND window_start = ?")
+        .run("comment:valid", 1_000),
+    ).toThrow("rate limit state must be nonnegative");
+    expect(() =>
+      database
+        .prepare("UPDATE rate_limits SET window_start = -1 WHERE key = ? AND window_start = ?")
+        .run("comment:valid", 1_000),
+    ).toThrow("rate limit state must be nonnegative");
+  });
+
+  it("requires valid upload-intent provenance JSON on insert and update", () => {
+    insertAgentChannel();
+
+    expect(() => {
+      insertIntent("int_invalid_provenance_insert", { provenanceJson: "not-json" });
+    }).toThrow("upload intent provenance must be valid JSON");
+
+    insertIntent("int_invalid_provenance_update");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET provenance_json = ? WHERE id = ?")
+        .run("not-json", "int_invalid_provenance_update"),
+    ).toThrow("upload intent provenance must be valid JSON");
+    expect(
+      database
+        .prepare("SELECT provenance_json FROM upload_intents WHERE id = ?")
+        .get("int_invalid_provenance_update"),
+    ).toEqual({ provenance_json: "{}" });
+  });
+
+  it("requires durable media and matching JSON provenance when finalizing an intent", () => {
+    insertAgentChannel();
+
+    expect(() =>
+      database
+        .prepare(
+          [
+            "INSERT INTO upload_intents (",
+            "id, agent_id, channel_id, status, declared_video_bytes, declared_video_sha256,",
+            "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at, finalized_at",
+            ") VALUES (?, ?, ?, 'finalized', ?, ?, 'video/mp4', ?, ?, ?, ?, ?, ?)",
+          ].join(" "),
+        )
+        .run(
+          "int_direct_finalized",
+          "agt_111111111111",
+          "chn_11111111-1111-4111-8111-111111111111",
+          VIDEO_BYTES.length,
+          VIDEO_HASH,
+          60,
+          "Direct finalized intent",
+          "{}",
+          1_000,
+          100_000,
+          2_100,
+        ),
+    ).toThrow("upload intents must transition through finalization");
+
+    insertIntent("int_finalized_at_without_status");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET finalized_at = ? WHERE id = ?")
+        .run(2_100, "int_finalized_at_without_status"),
+    ).toThrow("only finalized upload intents may have finalized_at");
+
+    insertIntent("int_finalize_without_video");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(2_100, "int_finalize_without_video"),
+    ).toThrow("finalized upload intent requires completed reviewable video");
+
+    const incompleteIntentId = "int_finalize_without_completion";
+    insertIntent(incompleteIntentId);
+    insertCapability(incompleteIntentId, "video", "cap_finalize_without_completion");
+    insertBlob(incompleteIntentId, "video", "blob_finalize_without_completion");
+    insertPendingVideo("vid_finalize_without_completion", incompleteIntentId, {
+      videoBlobId: "blob_finalize_without_completion",
+    });
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(2_100, incompleteIntentId),
+    ).toThrow("finalized upload intent requires completed reviewable video");
+
+    const outOfOrderIntentId = "int_finalize_video_before_use";
+    insertIntent(outOfOrderIntentId);
+    insertCapability(outOfOrderIntentId, "video", "cap_finalize_video_before_use");
+    insertBlob(outOfOrderIntentId, "video", "blob_finalize_video_before_use");
+    insertPendingVideo("vid_finalize_video_before_use", outOfOrderIntentId, {
+      videoBlobId: "blob_finalize_video_before_use",
+    });
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(2_050, "cap_finalize_video_before_use");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(2_100, outOfOrderIntentId),
+    ).toThrow("finalized upload intent requires completed reviewable video");
+
+    const durationIntentId = "int_finalize_duration_mismatch";
+    insertIntent(durationIntentId);
+    insertCapability(durationIntentId, "video", "cap_finalize_duration_mismatch");
+    insertBlob(durationIntentId, "video", "blob_finalize_duration_mismatch");
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, "cap_finalize_duration_mismatch");
+    insertPendingVideo("vid_finalize_duration_mismatch", durationIntentId, {
+      durationSeconds: 61,
+      videoBlobId: "blob_finalize_duration_mismatch",
+    });
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(2_100, durationIntentId),
+    ).toThrow("finalized upload intent requires completed reviewable video");
+
+    const thumbnailIntentId = "int_finalize_declared_thumbnail";
+    insertIntent(thumbnailIntentId, { thumbnailMime: "image/png" });
+    insertCapability(thumbnailIntentId, "video", "cap_finalize_thumbnail_video");
+    insertBlob(thumbnailIntentId, "video", "blob_finalize_thumbnail_video");
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, "cap_finalize_thumbnail_video");
+    insertPendingVideo("vid_finalize_declared_thumbnail", thumbnailIntentId, {
+      videoBlobId: "blob_finalize_thumbnail_video",
+    });
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(2_100, thumbnailIntentId),
+    ).toThrow("finalized upload intent requires completed reviewable video");
+    insertCapability(thumbnailIntentId, "thumbnail", "cap_finalize_declared_thumbnail");
+    insertBlob(thumbnailIntentId, "thumbnail", "blob_finalize_declared_thumbnail");
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_600, "cap_finalize_declared_thumbnail");
+    database
+      .prepare("UPDATE videos SET thumbnail_blob_id = ? WHERE id = ?")
+      .run("blob_finalize_declared_thumbnail", "vid_finalize_declared_thumbnail");
+    database
+      .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+      .run(2_100, thumbnailIntentId);
+
+    const intentId = "int_valid_finalization";
+    const capabilityId = "cap_valid_finalization";
+    const blobId = "blob_valid_finalization";
+    const videoId = "vid_valid_finalization";
+    const provenanceJson = '{"model":"vynema-test"}';
+    insertIntent(intentId, { provenanceJson });
+    insertCapability(intentId, "video", capabilityId);
+    insertBlob(intentId, "video", blobId);
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, capabilityId);
+
+    expect(() => {
+      insertPendingVideo("vid_invalid_json_provenance", intentId, {
+        provenanceJson: "not-json",
+        videoBlobId: blobId,
+      });
+    }).toThrow("video provenance must match its upload intent");
+    expect(() => {
+      insertPendingVideo("vid_mismatched_provenance", intentId, {
+        provenanceJson: '{"model":"other"}',
+        videoBlobId: blobId,
+      });
+    }).toThrow("video provenance must match its upload intent");
+    insertPendingVideo(videoId, intentId, { provenanceJson, videoBlobId: blobId });
+
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(1_900, intentId),
+    ).toThrow("finalized upload intent requires completed reviewable video");
+    database
+      .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+      .run(2_100, intentId);
+    expect(
+      database
+        .prepare("SELECT status, finalized_at FROM upload_intents WHERE id = ?")
+        .get(intentId),
+    ).toEqual({ status: "finalized", finalized_at: 2_100 });
+    expect(() =>
+      database.prepare("UPDATE upload_intents SET finalized_at = NULL WHERE id = ?").run(intentId),
+    ).toThrow("finalized upload intent evidence is immutable");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET provenance_json = ? WHERE id = ?")
+        .run('{"model":"rewritten"}', intentId),
+    ).toThrow("finalized upload intent evidence is immutable");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET declared_duration_seconds = ? WHERE id = ?")
+        .run(61, intentId),
+    ).toThrow("finalized upload intent evidence is immutable");
+    expect(() =>
+      database.prepare("UPDATE videos SET duration_seconds = ? WHERE id = ?").run(61, videoId),
+    ).toThrow("finalized video evidence is immutable");
+    expect(() =>
+      database.prepare("UPDATE videos SET size_bytes = size_bytes + 1 WHERE id = ?").run(videoId),
+    ).toThrow("finalized video evidence is immutable");
+    expect(() =>
+      database.prepare("UPDATE videos SET video_blob_id = NULL WHERE id = ?").run(videoId),
+    ).toThrow("finalized non-rejected videos must retain media evidence");
+    database.prepare("DELETE FROM upload_capabilities WHERE id = ?").run(capabilityId);
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET expires_at = expires_at + 1 WHERE id = ?")
+        .run(intentId),
+    ).toThrow("finalized upload intent evidence is immutable");
+    expect(() => database.prepare("DELETE FROM videos WHERE id = ?").run(videoId)).toThrow(
+      "finalized upload intents must retain their video record",
+    );
+  });
+
   it("enforces media ownership, kind, and BLOB length", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111", {
@@ -1328,14 +1635,24 @@ describe("canonical schema", () => {
   it("enforces publication lifecycle timestamps and retained media", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111");
+    insertCapability(
+      "int_11111111-1111-4111-8111-111111111111",
+      "video",
+      "cap_11111111-1111-4111-8111-111111111111",
+    );
+    insertBlob(
+      "int_11111111-1111-4111-8111-111111111111",
+      "video",
+      "blob_11111111-1111-4111-8111-111111111111",
+    );
 
     const insertLifecycleVideo = database.prepare(
       [
         "INSERT INTO videos (",
         "id, intent_id, agent_id, channel_id, status, title, duration_seconds,",
-        "size_bytes, sha256, provenance_json, published_at, rejected_at, taken_down_at,",
+        "size_bytes, sha256, provenance_json, video_blob_id, published_at, rejected_at, taken_down_at,",
         "created_at, updated_at",
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       ].join(" "),
     );
     const common = [
@@ -1354,6 +1671,7 @@ describe("canonical schema", () => {
         VIDEO_BYTES.length,
         VIDEO_HASH,
         "{}",
+        "blob_11111111-1111-4111-8111-111111111111",
         2_000,
         null,
         null,
@@ -1371,13 +1689,14 @@ describe("canonical schema", () => {
         VIDEO_BYTES.length,
         VIDEO_HASH,
         "{}",
+        "blob_11111111-1111-4111-8111-111111111111",
         null,
-        null,
+        2_000,
         null,
         2_000,
         2_000,
       ),
-    ).toThrow();
+    ).toThrow("rejected videos must transition from pending review");
     expect(() =>
       insertLifecycleVideo.run(
         "vid_33333333-3333-4333-8333-333333333333",
@@ -1388,16 +1707,17 @@ describe("canonical schema", () => {
         VIDEO_BYTES.length,
         VIDEO_HASH,
         "{}",
-        null,
+        "blob_11111111-1111-4111-8111-111111111111",
+        2_000,
         null,
         2_100,
         2_000,
         2_100,
       ),
-    ).toThrow();
+    ).toThrow("taken down videos must transition from published");
   });
 
-  it("requires an approval review before a video becomes published", () => {
+  it("requires approval and a published predecessor for takedown transitions", () => {
     insertAgentChannel();
     insertUser();
     insertIntent("int_11111111-1111-4111-8111-111111111111");
@@ -1442,12 +1762,29 @@ describe("canonical schema", () => {
       "int_11111111-1111-4111-8111-111111111111",
       { videoBlobId: "blob_11111111-1111-4111-8111-111111111111" },
     );
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, "cap_11111111-1111-4111-8111-111111111111");
+    database
+      .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+      .run(2_100, "int_11111111-1111-4111-8111-111111111111");
 
     expect(() =>
       database
         .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
         .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("published videos require an approval review");
+    ).toThrow(
+      /published videos require an approval review|publication requires a current approval no later than published_at/,
+    );
+    expect(() =>
+      database
+        .prepare(
+          "UPDATE videos SET status = 'taken_down', published_at = ?, taken_down_at = ? WHERE id = ?",
+        )
+        .run(2_500, 2_600, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow(
+      /taken down videos require retained publication approval|invalid video status transition/,
+    );
 
     database
       .prepare(
@@ -1465,7 +1802,9 @@ describe("canonical schema", () => {
       database
         .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
         .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("published videos require an approval review");
+    ).toThrow(
+      /published videos require an approval review|publication requires a current approval no later than published_at/,
+    );
     database
       .prepare("UPDATE users SET role = 'reviewer', status = 'banned' WHERE id = ?")
       .run("usr_11111111-1111-4111-8111-111111111111");
@@ -1473,10 +1812,47 @@ describe("canonical schema", () => {
       database
         .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
         .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("published videos require an approval review");
+    ).toThrow(
+      /published videos require an approval review|publication requires a current approval no later than published_at/,
+    );
     database
       .prepare("UPDATE users SET status = 'active' WHERE id = ?")
       .run("usr_11111111-1111-4111-8111-111111111111");
+    insertIntent("int_publish_before_finalize");
+    insertCapability("int_publish_before_finalize", "video", "cap_publish_before_finalize");
+    insertBlob("int_publish_before_finalize", "video", "blob_publish_before_finalize");
+    insertPendingVideo("vid_publish_before_finalize", "int_publish_before_finalize", {
+      videoBlobId: "blob_publish_before_finalize",
+    });
+    database
+      .prepare(
+        "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+      )
+      .run(
+        "rev_publish_before_finalize",
+        "vid_publish_before_finalize",
+        "usr_11111111-1111-4111-8111-111111111111",
+        "Approval cannot bypass finalize.",
+        2_500,
+      );
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
+        .run(3_000, "vid_publish_before_finalize"),
+    ).toThrow("publication requires a finalized upload intent");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
+        .run(2_400, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("publication requires a current approval no later than published_at");
+    database
+      .prepare("UPDATE moderation_reviews SET created_at = ? WHERE id = ?")
+      .run(1_500, "rev_11111111-1111-4111-8111-111111111111");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
+        .run(1_900, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("publication requires a finalized upload intent");
     database
       .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
       .run(3_000, "vid_11111111-1111-4111-8111-111111111111");
@@ -1485,6 +1861,104 @@ describe("canonical schema", () => {
         .prepare("SELECT status, published_at FROM videos WHERE id = ?")
         .get("vid_11111111-1111-4111-8111-111111111111"),
     ).toEqual({ status: "published", published_at: 3_000 });
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+        )
+        .run(
+          "rev_backfilled_approval",
+          "vid_11111111-1111-4111-8111-111111111111",
+          "usr_11111111-1111-4111-8111-111111111111",
+          "Backfilled approval.",
+          1_800,
+        ),
+    ).toThrow("publication approval evidence cannot be backfilled");
+    database
+      .prepare(
+        "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'rejected', ?, ?)",
+      )
+      .run(
+        "rev_rejected_before_publication",
+        "vid_11111111-1111-4111-8111-111111111111",
+        "usr_11111111-1111-4111-8111-111111111111",
+        "Rejected review cannot become approval evidence.",
+        1_800,
+      );
+    expect(() =>
+      database
+        .prepare("UPDATE moderation_reviews SET decision = 'approved' WHERE id = ?")
+        .run("rev_rejected_before_publication"),
+    ).toThrow("publication approval evidence is immutable");
+    database
+      .prepare(
+        "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+      )
+      .run(
+        "rev_late_approval",
+        "vid_11111111-1111-4111-8111-111111111111",
+        "usr_11111111-1111-4111-8111-111111111111",
+        "Late non-qualifying approval.",
+        3_500,
+      );
+    expect(() =>
+      database
+        .prepare("UPDATE moderation_reviews SET created_at = ? WHERE id = ?")
+        .run(2_900, "rev_late_approval"),
+    ).toThrow("publication approval evidence is immutable");
+    expect(() =>
+      database
+        .prepare("DELETE FROM moderation_reviews WHERE id = ?")
+        .run("rev_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("publication approval evidence is immutable");
+    expect(() =>
+      database
+        .prepare("UPDATE moderation_reviews SET decision = 'rejected' WHERE id = ?")
+        .run("rev_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("publication approval evidence is immutable");
+    expect(() =>
+      database
+        .prepare("UPDATE moderation_reviews SET created_at = ? WHERE id = ?")
+        .run(3_500, "rev_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("publication approval evidence is immutable");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'rejected', rejected_at = ? WHERE id = ?")
+        .run(3_500, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("invalid video status transition");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET published_at = ? WHERE id = ?")
+        .run(3_100, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("published_at is immutable after publication");
+    database
+      .prepare("UPDATE users SET role = 'viewer', status = 'banned' WHERE id = ?")
+      .run("usr_11111111-1111-4111-8111-111111111111");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'taken_down', taken_down_at = ? WHERE id = ?")
+        .run(2_500, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("taken down videos require retained publication approval and a valid timestamp");
+    database
+      .prepare("UPDATE videos SET status = 'taken_down', taken_down_at = ? WHERE id = ?")
+      .run(4_000, "vid_11111111-1111-4111-8111-111111111111");
+    expect(
+      database
+        .prepare("SELECT status, published_at, taken_down_at FROM videos WHERE id = ?")
+        .get("vid_11111111-1111-4111-8111-111111111111"),
+    ).toEqual({ status: "taken_down", published_at: 3_000, taken_down_at: 4_000 });
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET taken_down_at = ? WHERE id = ?")
+        .run(4_100, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("taken_down_at is immutable after takedown");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'published' WHERE id = ?")
+        .run("vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow(
+      /invalid video status transition|published videos must transition from pending review/,
+    );
   });
 
   it("restricts referenced BLOB deletion and makes purge transactions atomic", () => {
@@ -1501,29 +1975,21 @@ describe("canonical schema", () => {
       "blob_11111111-1111-4111-8111-111111111111",
     );
     database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, "cap_11111111-1111-4111-8111-111111111111");
+    insertPendingVideo(
+      "vid_11111111-1111-4111-8111-111111111111",
+      "int_11111111-1111-4111-8111-111111111111",
+      { videoBlobId: "blob_11111111-1111-4111-8111-111111111111" },
+    );
+    database
+      .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+      .run(2_100, "int_11111111-1111-4111-8111-111111111111");
+    database
       .prepare(
-        [
-          "INSERT INTO videos (",
-          "id, intent_id, agent_id, channel_id, status, title, duration_seconds,",
-          "size_bytes, sha256, provenance_json, video_blob_id, rejected_at, created_at, updated_at",
-          ") VALUES (?, ?, ?, ?, 'rejected', ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-        ].join(" "),
+        "UPDATE videos SET status = 'rejected', rejected_at = ?, updated_at = ? WHERE id = ?",
       )
-      .run(
-        "vid_11111111-1111-4111-8111-111111111111",
-        "int_11111111-1111-4111-8111-111111111111",
-        "agt_111111111111",
-        "chn_11111111-1111-4111-8111-111111111111",
-        "Rejected",
-        60,
-        VIDEO_BYTES.length,
-        VIDEO_HASH,
-        "{}",
-        "blob_11111111-1111-4111-8111-111111111111",
-        2_100,
-        2_000,
-        2_100,
-      );
+      .run(2_200, 2_200, "vid_11111111-1111-4111-8111-111111111111");
 
     expect(() =>
       database
@@ -1632,11 +2098,11 @@ describe("canonical schema", () => {
 
     try {
       expect(applyMigrations(fallbackDatabase, migrationsDirectory, { fts5: false })).toEqual([
-        1, 2,
+        1, 2, 3,
       ]);
       expect(getSearchIndexMode(fallbackDatabase)).toBe("portable");
       expect(() => {
-        assertCanonicalMigratedSchema(fallbackDatabase, migrationsDirectory, 2);
+        assertCanonicalMigratedSchema(fallbackDatabase, migrationsDirectory, 3);
       }).not.toThrow();
       database = fallbackDatabase;
       insertAgentChannel();

@@ -60,7 +60,8 @@ Source Task: TSK-1260
 
 ### 1. Migration mechanics
 
-- Files live in `apps/api/migrations/`, named `0001_init.sql`, `0002_seed_config.sql`, …
+- Files live in `apps/api/migrations/`, named `0001_init.sql`,
+  `0002_seed_config.sql`, `0003_guard_reviewed_invariants.sql`, …
 - Apply locally with the repository migration command, e.g. `pnpm --filter @vynema/api db:migrate`.
 - Migrations are forward-only. Before applying, copy the SQLite database file to a timestamped local backup; every migration ends with `-- recovery:` guidance for restore or fix-forward. Production backup/restore is deferred to #42.
 - The repository runner owns an internal `schema_migrations` ledger with the
@@ -557,7 +558,52 @@ runtime that cannot provide FTS5.
 
 `INSERT OR IGNORE INTO platform_config (key, value, updated_at, updated_by) VALUES …` for every ADR-009 key/default from issue #2 (uploads_enabled=true, publication_enabled=true, public_read_enabled=true, max_video_bytes=104857600, max_thumbnail_bytes=2097152, max_declared_duration_seconds=600, allowed_video_mime=video/mp4, per_agent_daily_intents=5, per_agent_active_storage_bytes=2147483648, global_daily_intents=20, global_active_storage_bytes=8589934592, per_agent_daily_publications=5, global_daily_publications=20). Use `0` as updated_at for seeds.
 
-### 4. TypeScript row types & repo base
+### 4. `0003_guard_reviewed_invariants.sql`
+
+This is a fix-forward migration. `0001` and `0002` remain immutable. It adds
+guards for invariants already required by the upload, finalize, publication,
+cleanup, and rate-limit designs:
+
+- capability claim, BLOB creation, capability use, video creation, and
+  finalization timestamps remain inside the intent/capability authorization
+  windows and in causal order (`BLOB.created_at <= capability.used_at <=
+  video.created_at <= intent.finalized_at`);
+- upload-intent provenance is valid JSON on every insert/update; video
+  provenance is also valid JSON and byte-for-byte equal to the owning upload
+  intent provenance;
+- an intent can become `finalized` only through the `created` transition with
+  a completed video capability, matching immutable BLOB, and linked
+  `pending_review` video whose duration matches the declaration. When a
+  thumbnail was declared, its completed capability, matching BLOB, and video
+  reference are also required. Finalized timestamps/declarations/provenance
+  and the retained video's identity/binding/duration metadata cannot later be
+  erased or rewritten;
+- finalized intents retain their video record. A finalized non-rejected video
+  retains its video BLOB reference, while the canonical rejected-media cleanup
+  path may clear that reference and later purge the expired capability;
+- video status is a one-way state machine: `pending_review` may become
+  `published` or `rejected`, and only `published` may become `taken_down`;
+  direct inserts in terminal states and all reverse/cross-terminal transitions
+  are rejected;
+- publication requires the owning intent to be `finalized` no later than
+  `published_at`, `published_at >= videos.created_at`, and an approval from a
+  currently active reviewer/admin created no later than `published_at`. Once
+  used, that approval's identity, reviewer, decision, video, and timestamp plus
+  the video's publication timestamp are immutable. A qualifying historical
+  approval cannot be inserted or transformed from a late/rejected review after
+  publication;
+- takedown requires retained historical approval and
+  `taken_down_at >= published_at`; both lifecycle timestamps are immutable after
+  their transition. A later reviewer role or account-status change does not
+  rewrite the historical approval fact;
+- rate-limit windows and counts are nonnegative on insert and update.
+
+Restore preflight independently rechecks these durable invariants, including
+publication/takedown timestamp order, accepts the two canonical cleanup states
+above, and rejects a restore source that resolves to the active database through
+an identical path, symlink, or hard link.
+
+### 5. TypeScript row types & repo base
 
 - `apps/api/src/lib/repo/types.ts`: one `XxxRow` type per table, field-for-field (snake_case as stored; do NOT camelCase rows — mapping to DTOs happens in routes).
 - `apps/api/src/lib/repo/db.ts`: helpers `nowMs()`, `newId()` (= `crypto.randomUUID()`), `one<T>(stmt)`, `all<T>(stmt)`, and `transaction(fn)` wrapping SQLite transactions for atomic multi-statement sequences.
@@ -568,43 +614,47 @@ runtime that cannot provide FTS5.
   available. Never add private-key material or apply local fixtures to
   production.
 
-### 5. Step-by-step order
+### 6. Step-by-step order
 
 1. Write `0001_init.sql`; apply locally; fix syntax until clean. Checkpoint: the repository migration command succeeds against a newly created temporary SQLite file.
 2. Write `0002_seed_config.sql`; verify 13 config rows exist.
-3. Add row types + db helpers + `config.ts`.
-4. Tests (§6).
-5. `docs/development.md#database` section: apply/reset/inspect commands using
+3. Add `0003_guard_reviewed_invariants.sql` without editing either applied predecessor.
+4. Add row types + db helpers + `config.ts`.
+5. Tests (§7).
+6. `docs/development.md#database` section: apply/reset/inspect commands using
    the selected local SQLite CLI/library and backup restore. Issue #46 adds the
    separate local-fixture application and usage instructions.
 
-### 6. Tests (`apps/api/test/schema.test.ts`)
+### 7. Tests (`apps/api/test/schema.test.ts`)
 
 | Test | Assertion |
 |---|---|
-| migrations apply | both files apply cleanly on a fresh temporary SQLite database |
+| migrations apply | all three files apply cleanly on a fresh temporary SQLite database |
 | FK enforcement | inserting a `videos` row with unknown `agent_id` fails |
 | CHECK enforcement | invalid `videos.status` value fails; 2001-char comment body fails |
 | primary-key nullability | every single-column TEXT primary key is explicitly `NOT NULL`; representative identity, config, and audit inserts with null keys fail |
 | token/hash shape | raw, wrong-length, non-lowercase-hex, or BLOB-backed session, declaration, capability, media, and video SHA-256 values fail |
 | numeric storage class | non-integer identity numbers, timestamps, expiry/state times, upload declaration bytes/duration, capability expected bytes, media bytes, video bytes/duration, quota values, and rate-limit counters fail |
 | intent/capability metadata | JPEG and PNG declarations persist; partially-null thumbnail fields fail, including valid size/hash with null MIME; capability expected size/hash/MIME differing from its intent fails |
-| capability completion | `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
+| capability timeline and completion | claim/BLOB/use timestamps outside their authorization window or causal order fail; `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
 | media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail; stored media id and creation time cannot be updated |
 | BLOB storage and length | same-length TEXT content and `length(content) != size_bytes` fail; a Buffer-backed BLOB matching `size_bytes` succeeds |
-| video lifecycle | `ai_generated != 1`, direct publication, publication without an approval from a currently active reviewer/admin (including viewer or banned-user approvals), `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps fail |
+| finalization and provenance | invalid upload-intent JSON on insert/update, direct or incomplete finalization, missing/rewritten `finalized_at`, invalid/mismatched video provenance JSON, capability use after video creation, duration drift, a missing declared thumbnail binding, and finalization before the linked video fail; a completed video plus any declared thumbnail succeeds |
+| video lifecycle | `ai_generated != 1`, direct publication/rejection/takedown, publication before intent finalization or without a current reviewer/admin approval created no later than `published_at`, publication before video creation, pending-to-takedown, published-to-rejected/reverse transitions, post-publication qualifying approval insertion/transformation/deletion/rewrite, lifecycle timestamp rewrite, `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps or with `taken_down_at < published_at` fail; published-to-takedown accepts retained historical approval after a later reviewer role/status change |
 | purge FK behavior | deleting a referenced BLOB fails; eligible rejected purge clears references and deletes same-intent BLOB in one transaction; injected failure rolls all of it back |
 | uniqueness | duplicate `agent_nonces` (agent_id, nonce) fails; duplicate `videos.intent_id` fails; duplicate `likes` PK fails |
 | search sync | both forced portable mode and runtime-selected mode keep `videos_fts` synchronized across insert/update/delete; FTS5 uses `MATCH`, portable mode uses bounded case-insensitive search |
 | config load | `getConfig` returns typed values; deleting a key makes it throw `ConfigUnavailableError` |
 | quota integrity | non-integer/negative counters and non-integer ledger deltas fail; ledger records the identical `period_start`; daily rollover reconciles per period; double/insufficient release rolls back |
+| rate-limit integrity | non-integer or negative windows/counts fail on insert; valid rows cannot be updated to negative state |
 | transaction helper | synchronous callback failure rolls back; a Promise-like object or callable function, including throwing `then` inspection, rolls back and invalidates its connection before a resumed microtask can write outside the transaction |
-| restore preflight | incompatible migration metadata, orphaned foreign keys, non-pristine version-zero databases, migrated databases missing canonical tables/indexes/triggers, upload capabilities that no longer match their intent declarations, media blobs that no longer match a claimed capability, used capabilities outside their capability/intent expiry window or without their verified blob, existing videos whose intent ownership or media references no longer satisfy the canonical trigger predicates, published/taken-down videos without retained approval evidence, and stale portable/FTS5 search-index content are rejected without changing the active database; durable in-window used-capability/finalized-intent state is accepted; a pristine version-zero source is accepted; a live WAL source is restored from a transactionally consistent snapshot without losing committed rows |
+| restore preflight | incompatible migration metadata, orphaned foreign keys, non-pristine version-zero databases, migrated databases missing canonical tables/indexes/triggers, authorization timeline drift (including capability use after video creation), invalid finalized lifecycle/provenance/duration/declared-thumbnail binding, negative rate-limit state, invalid video ownership/media references, published/taken-down videos without a finalized intent and approval predating publication or with invalid publication/takedown timestamp order, active-database path/symlink/hard-link aliases, and stale portable/FTS5 search-index content are rejected without changing the active database; retained historical approval and canonical rejected-media/expired-capability cleanup states are accepted; a pristine version-zero source is accepted; a live WAL source is restored from a transactionally consistent snapshot without losing committed rows |
 
-### 7. Acceptance mapping & PR evidence
+### 8. Acceptance mapping & PR evidence
 
 - "Migrations can be applied in the current environment" → local step 1; production/preview migration acceptance is blocked on #42, not #21.
 - "Schema supports every entity" → §2 covers agents/keys/nonces/intents/videos/channels/comments/likes/saves/follows/reports/reviews/quota/audit (v2 naming supersedes the v1 names in the issue body; `AgentUploadIntent`→`upload_intents`, `VideoAsset`→`videos`, `StorageQuotaLedger`→`quota_ledger`+`quota_counters`).
 - "Intents cannot be finalized into public assets without review state" → `videos.status` default `pending_review`, UNIQUE `intent_id`, direct-publish rejection, and the approved-review trigger; #10/#11 implement the transactional application path.
-- "Rollback or recovery guidance" → recovery comments + docs (§5.5).
+- "Rollback or recovery guidance" → recovery comments and
+  `docs/development.md#database-operations`.
 - PR evidence: test output, fresh-apply transcript, and a security note (schema only, no secrets, no public exposure change).
