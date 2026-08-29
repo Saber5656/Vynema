@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, realpathSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
@@ -42,6 +42,12 @@ type RestoredMediaBindingMismatchRow = {
 
 type RestoredUploadProvenanceMismatchRow = {
   id: string;
+};
+
+type RestoredMediaBlobContentRow = {
+  content: Uint8Array;
+  id: string;
+  sha256: string;
 };
 
 type RestoredRateLimitMismatchRow = {
@@ -106,6 +112,20 @@ function assertRestoredUploadProvenanceConsistency(database: Database): void {
 
   if (applicationTables.length !== 3) {
     return;
+  }
+
+  const mediaBlobs = database
+    .prepare("SELECT id, content, sha256 FROM media_blobs ORDER BY id")
+    .iterate() as IterableIterator<RestoredMediaBlobContentRow>;
+
+  for (const mediaBlob of mediaBlobs) {
+    const actualSha256 = createHash("sha256").update(mediaBlob.content).digest("hex");
+
+    if (actualSha256 !== mediaBlob.sha256) {
+      throw new Error(
+        `Restore candidate media blob ${mediaBlob.id} content does not match its SHA-256 metadata.`,
+      );
+    }
   }
 
   const capabilityMismatch = database

@@ -29,9 +29,9 @@ let database: Database | undefined;
 let temporaryDirectory: string | undefined;
 const repositoryMigrationsDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
 const RESTORE_VIDEO_BYTES = Buffer.alloc(1024, 7);
-const RESTORE_VIDEO_SHA256 = "a".repeat(64);
+const RESTORE_VIDEO_SHA256 = "a99c07ce93703c7390589c5b007bd9a97a8b6de29e9a920d474d4f028ce2d42c";
 const RESTORE_THUMBNAIL_BYTES = Buffer.alloc(4, 8);
-const RESTORE_THUMBNAIL_SHA256 = "c".repeat(64);
+const RESTORE_THUMBNAIL_SHA256 = "918bd027f59087bef8e055f9b587b25486d58c606d8658d4ce7b1199274f6744";
 
 function runtimeHasFts5(): boolean {
   const probe = openDatabase(":memory:");
@@ -1389,6 +1389,16 @@ describe("applyMigrations", () => {
               "UPDATE upload_capabilities SET expected_sha256 = ? WHERE intent_id = ? AND kind = 'video'",
             )
             .run("c".repeat(64), intentId);
+        },
+      },
+      {
+        candidateName: "same-length-media-content-tamper.sqlite",
+        droppedTriggers: ["media_blob_immutable"],
+        expectedViolation: "content does not match its SHA-256 metadata",
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE media_blobs SET content = ? WHERE intent_id = ? AND kind = 'video'")
+            .run(Buffer.alloc(RESTORE_VIDEO_BYTES.length, 9), intentId);
         },
       },
       {
