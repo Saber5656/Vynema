@@ -278,7 +278,7 @@ CREATE TABLE media_blobs (
   mime TEXT NOT NULL,
   created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   UNIQUE(intent_id, kind),
-  CHECK (length(content) = size_bytes)
+  CHECK (typeof(content) = 'blob' AND length(content) = size_bytes)
 );
 CREATE UNIQUE INDEX uq_media_blobs_identity ON media_blobs(id, intent_id, kind);
 CREATE INDEX idx_media_blobs_intent ON media_blobs(intent_id);
@@ -591,7 +591,7 @@ runtime that cannot provide FTS5.
 | intent/capability metadata | JPEG and PNG declarations persist; partially-null thumbnail fields fail, including valid size/hash with null MIME; capability expected size/hash/MIME differing from its intent fails |
 | capability completion | `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
 | media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail; stored media id and creation time cannot be updated |
-| BLOB length | `length(content) != size_bytes` fails |
+| BLOB storage and length | same-length TEXT content and `length(content) != size_bytes` fail; a Buffer-backed BLOB matching `size_bytes` succeeds |
 | video lifecycle | `ai_generated != 1`, direct publication, publication without an approval from a currently active reviewer/admin (including viewer or banned-user approvals), `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps fail |
 | purge FK behavior | deleting a referenced BLOB fails; eligible rejected purge clears references and deletes same-intent BLOB in one transaction; injected failure rolls all of it back |
 | uniqueness | duplicate `agent_nonces` (agent_id, nonce) fails; duplicate `videos.intent_id` fails; duplicate `likes` PK fails |

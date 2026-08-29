@@ -203,7 +203,7 @@ CREATE TABLE media_blobs (
   mime TEXT NOT NULL,
   created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   UNIQUE(intent_id, kind),
-  CHECK (length(content) = size_bytes)
+  CHECK (typeof(content) = 'blob' AND length(content) = size_bytes)
 );
 CREATE UNIQUE INDEX uq_media_blobs_identity ON media_blobs(id, intent_id, kind);
 CREATE INDEX idx_media_blobs_intent ON media_blobs(intent_id);

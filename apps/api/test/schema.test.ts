@@ -1255,6 +1255,39 @@ describe("canonical schema", () => {
     ).toThrow();
   });
 
+  it("requires media content to use BLOB storage", () => {
+    const intentId = "int_44444444-4444-4444-8444-444444444444";
+    const capabilityId = "cap_44444444-4444-4444-8444-444444444444";
+    const blobId = "blob_44444444-4444-4444-8444-444444444444";
+    insertAgentChannel();
+    insertIntent(intentId);
+    insertCapability(intentId, "video", capabilityId);
+
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO media_blobs (id, intent_id, kind, content, size_bytes, sha256, mime, created_at) VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?)",
+        )
+        .run(
+          blobId,
+          intentId,
+          "x".repeat(VIDEO_BYTES.length),
+          VIDEO_BYTES.length,
+          VIDEO_HASH,
+          1_300,
+        ),
+    ).toThrow();
+
+    insertBlob(intentId, "video", blobId);
+    expect(
+      database
+        .prepare(
+          "SELECT typeof(content) AS storage_class, length(content) AS content_length FROM media_blobs WHERE id = ?",
+        )
+        .get(blobId),
+    ).toEqual({ storage_class: "blob", content_length: VIDEO_BYTES.length });
+  });
+
   it("keeps stored media identity and creation time immutable", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111");
