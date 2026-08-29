@@ -19,9 +19,13 @@ Related current baselines:
 - `docs/security/README.md`
 - `docs/security/vynema-threat-model.md`
 - `docs/security/security-contract.md`
-- `docs/policy/ai-content-disclosure.md` - pre-alpha baseline; owner and counsel review pending
-- `docs/policy/terms-baseline.md` - pre-alpha baseline; owner and counsel review pending
-- `docs/policy/moderation-policy.md` - pre-alpha baseline; owner and counsel review pending
+- [AI content disclosure](../policy/ai-content-disclosure.md) - current
+  pre-alpha documentation contract; #15/#16 own runtime evidence
+- [Terms baseline](../policy/terms-baseline.md) - current pre-alpha wording
+  baseline; not operative hosted-service terms, with counsel/launch approval
+  still pending
+- [Moderation policy](../policy/moderation-policy.md) - current pre-alpha enum
+  and behavior contract; #4/#13 own runtime implementation and tests
 
 ## Product Definition
 
