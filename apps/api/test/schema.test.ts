@@ -1975,6 +1975,11 @@ describe("canonical schema", () => {
     ).toThrow("publication approval evidence is immutable");
     expect(() =>
       database
+        .prepare("UPDATE moderation_reviews SET reason = ? WHERE id = ?")
+        .run("Rewritten after publication.", "rev_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("publication approval evidence is immutable");
+    expect(() =>
+      database
         .prepare("UPDATE videos SET status = 'rejected', rejected_at = ? WHERE id = ?")
         .run(3_500, "vid_11111111-1111-4111-8111-111111111111"),
     ).toThrow("invalid video status transition");

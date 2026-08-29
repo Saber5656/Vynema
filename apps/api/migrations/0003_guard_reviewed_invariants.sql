@@ -606,7 +606,7 @@ WHEN NEW.decision = 'approved' AND EXISTS (
 END;
 
 CREATE TRIGGER moderation_review_publication_update_v3
-BEFORE UPDATE OF id, video_id, reviewer_user_id, decision, created_at ON moderation_reviews
+BEFORE UPDATE OF id, video_id, reviewer_user_id, decision, reason, created_at ON moderation_reviews
 WHEN (
   (OLD.decision = 'approved' AND EXISTS (
     SELECT 1 FROM videos v WHERE v.id = OLD.video_id
@@ -620,7 +620,8 @@ WHEN (
 ) AND (
   NEW.id IS NOT OLD.id OR NEW.video_id IS NOT OLD.video_id
   OR NEW.reviewer_user_id IS NOT OLD.reviewer_user_id
-  OR NEW.decision IS NOT OLD.decision OR NEW.created_at IS NOT OLD.created_at
+  OR NEW.decision IS NOT OLD.decision OR NEW.reason IS NOT OLD.reason
+  OR NEW.created_at IS NOT OLD.created_at
 ) BEGIN
   SELECT RAISE(ABORT, 'publication approval evidence is immutable');
 END;
