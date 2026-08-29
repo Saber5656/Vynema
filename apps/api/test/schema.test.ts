@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { openDatabase, type Database } from "../src/lib/database.js";
-import { applyMigrations, getSearchIndexMode } from "../src/lib/migrations.js";
+import {
+  applyMigrations,
+  assertCanonicalMigratedSchema,
+  getSearchIndexMode,
+} from "../src/lib/migrations.js";
 import { ConfigUnavailableError, getConfig } from "../src/lib/repo/config.js";
 import { all, newId, nowMs, one, transaction } from "../src/lib/repo/db.js";
 
@@ -212,6 +216,9 @@ describe("canonical schema", () => {
     expect(database.prepare("PRAGMA user_version").get()).toEqual({
       user_version: 2,
     });
+    expect(() => {
+      assertCanonicalMigratedSchema(database, migrationsDirectory, 2);
+    }).not.toThrow();
 
     const tables = (
       database
@@ -1073,6 +1080,9 @@ describe("canonical schema", () => {
         1, 2,
       ]);
       expect(getSearchIndexMode(fallbackDatabase)).toBe("portable");
+      expect(() => {
+        assertCanonicalMigratedSchema(fallbackDatabase, migrationsDirectory, 2);
+      }).not.toThrow();
       database = fallbackDatabase;
       insertAgentChannel();
       insertIntent("int_11111111-1111-4111-8111-111111111111");

@@ -8,7 +8,12 @@ import {
   openDatabase,
   type Database,
 } from "./database.js";
-import { createTimestampedBackup, getMigrationStatus, type MigrationStatus } from "./migrations.js";
+import {
+  assertCanonicalMigratedSchema,
+  createTimestampedBackup,
+  getMigrationStatus,
+  type MigrationStatus,
+} from "./migrations.js";
 
 export type RestoreDatabaseOptions = {
   activeDatabasePath: string;
@@ -59,6 +64,7 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
     assertDatabaseIntegrity(database);
     const migrationStatus = getMigrationStatus(database, migrationsDirectory);
     assertPristineVersionZeroDatabase(database, migrationStatus);
+    assertCanonicalMigratedSchema(database, migrationsDirectory, migrationStatus.currentVersion);
     return migrationStatus;
   } finally {
     database.close();

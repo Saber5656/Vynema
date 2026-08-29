@@ -528,6 +528,81 @@ describe("applyMigrations", () => {
     expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual([]);
   });
 
+  it("rejects migrated restore candidates with schema objects removed", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const canonicalSourcePath = join(fixtureDirectory, "canonical-source.sqlite");
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_restore_schema.sql"),
+      [
+        "CREATE TABLE restore_probe (value TEXT NOT NULL);",
+        "CREATE TABLE audit_events (id TEXT NOT NULL PRIMARY KEY);",
+        "CREATE TRIGGER restore_probe_guard BEFORE DELETE ON restore_probe BEGIN SELECT RAISE(ABORT, 'immutable'); END;",
+        "-- recovery: restore backup",
+      ].join("\n"),
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+    fixture.database.prepare("INSERT INTO restore_probe (value) VALUES (?)").run("active-data");
+    fixture.database.close();
+    database = undefined;
+
+    const canonicalSource = openDatabase(canonicalSourcePath);
+    try {
+      expect(applyMigrations(canonicalSource, fixture.migrationsDirectory)).toEqual([1]);
+      canonicalSource.prepare("INSERT INTO restore_probe (value) VALUES (?)").run("backup-data");
+    } finally {
+      canonicalSource.close();
+    }
+
+    const activeBytesBefore = readFileSync(databasePath);
+    const tamperedCandidates = [
+      {
+        path: join(fixtureDirectory, "missing-table.sqlite"),
+        sql: "DROP TABLE audit_events",
+      },
+      {
+        path: join(fixtureDirectory, "missing-trigger.sqlite"),
+        sql: "DROP TRIGGER restore_probe_guard",
+      },
+    ];
+
+    for (const tamperedCandidate of tamperedCandidates) {
+      copyFileSync(canonicalSourcePath, tamperedCandidate.path);
+      const candidate = openDatabase(tamperedCandidate.path);
+      try {
+        candidate.exec(tamperedCandidate.sql);
+        expect(getMigrationStatus(candidate, fixture.migrationsDirectory)).toMatchObject({
+          currentVersion: 1,
+          latestVersion: 1,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: databasePath,
+          backupPath: tamperedCandidate.path,
+          migrationsDirectory: fixture.migrationsDirectory,
+        }),
+      ).rejects.toThrow("schema does not match repository migrations");
+      expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
+    }
+  });
+
   it("fails closed when foreign keys or recovery guidance are absent", () => {
     const fixture = createFixture();
     writeFileSync(

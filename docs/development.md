@@ -141,7 +141,11 @@ pnpm --filter @vynema/api db:reset -- --yes
 
 Migrations are forward-only and contiguous from `0001`. The runner records each
 applied filename and SHA-256 in its internal `schema_migrations` ledger and
-fails closed if that ledger, `PRAGMA user_version`, or an applied file drifts.
+fails closed if that ledger, `PRAGMA user_version`, an applied file, or the
+installed table/index/trigger schema drifts from the repository migrations.
+Restore validation builds the expected schema for the candidate's version and
+search mode; SQLite-reported virtual-table shadow objects are excluded, while
+all repository-owned schema objects must match exactly.
 Never edit, rename, delete, or roll back an applied migration. To recover from a
 failed local migration, either restore the printed pre-migration backup,
 correct an unapplied SQL file, or add the next numbered fix-forward migration.

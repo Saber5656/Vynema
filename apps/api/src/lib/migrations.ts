@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import { backupDatabase, type Database } from "./database.js";
+import { backupDatabase, openDatabase, type Database } from "./database.js";
 
 const MIGRATION_NAME = /^(\d{4,})_[a-z0-9][a-z0-9_-]*\.sql$/;
 const MAX_USER_VERSION = 2_147_483_647;
@@ -71,6 +71,18 @@ type CompileOptionRow = {
 
 type SearchIndexSchemaRow = {
   sql: string | null;
+};
+
+type SchemaObjectRow = {
+  type: string;
+  name: string;
+  tbl_name: string;
+  sql: string | null;
+};
+
+type TableListRow = {
+  name: string;
+  type: string;
 };
 
 export function detectMigrationCapabilities(database: Database): MigrationCapabilities {
@@ -322,6 +334,7 @@ export function applyMigrations(
   database: Database,
   migrationsDirectory: string,
   capabilities = detectMigrationCapabilities(database),
+  maximumVersion?: number,
 ): number[] {
   const foreignKeys = database.prepare("PRAGMA foreign_keys").get() as
     { foreign_keys: number } | undefined;
@@ -330,7 +343,20 @@ export function applyMigrations(
     throw new Error("SQLite foreign-key enforcement is disabled.");
   }
 
-  const { pendingMigrations } = getMigrationStatus(database, migrationsDirectory);
+  const status = getMigrationStatus(database, migrationsDirectory);
+  const targetVersion = maximumVersion ?? status.latestVersion;
+
+  if (
+    !Number.isSafeInteger(targetVersion) ||
+    targetVersion < status.currentVersion ||
+    targetVersion > status.latestVersion
+  ) {
+    throw new Error(`Invalid target migration version: ${targetVersion}`);
+  }
+
+  const pendingMigrations = status.pendingMigrations.filter(
+    (migration) => migration.version <= targetVersion,
+  );
   const appliedVersions: number[] = [];
 
   for (const migration of pendingMigrations) {
@@ -369,6 +395,68 @@ export function applyMigrations(
   }
 
   return appliedVersions;
+}
+
+function readCanonicalSchemaObjects(database: Database): SchemaObjectRow[] {
+  const shadowTables = new Set(
+    (database.prepare("PRAGMA table_list").all() as TableListRow[])
+      .filter((row) => row.type === "shadow")
+      .map((row) => row.name),
+  );
+
+  return (
+    database
+      .prepare(
+        [
+          "SELECT type, name, tbl_name, sql FROM sqlite_schema",
+          "WHERE name NOT GLOB 'sqlite_*'",
+          "ORDER BY type, name, tbl_name",
+        ].join(" "),
+      )
+      .all() as SchemaObjectRow[]
+  ).filter((row) => !shadowTables.has(row.name) && !shadowTables.has(row.tbl_name));
+}
+
+function inferInstalledMigrationCapabilities(database: Database): MigrationCapabilities {
+  const searchIndex = database
+    .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' AND name = 'videos_fts'")
+    .get() as SearchIndexSchemaRow | undefined;
+
+  if (!searchIndex?.sql) {
+    return detectMigrationCapabilities(database);
+  }
+
+  return { fts5: /\bUSING\s+fts5\b/i.test(searchIndex.sql) };
+}
+
+export function assertCanonicalMigratedSchema(
+  database: Database,
+  migrationsDirectory: string,
+  currentVersion: number,
+): void {
+  if (currentVersion === 0) {
+    return;
+  }
+
+  const expected = openDatabase(":memory:");
+
+  try {
+    applyMigrations(
+      expected,
+      migrationsDirectory,
+      inferInstalledMigrationCapabilities(database),
+      currentVersion,
+    );
+
+    const actualSchema = readCanonicalSchemaObjects(database);
+    const expectedSchema = readCanonicalSchemaObjects(expected);
+
+    if (JSON.stringify(actualSchema) !== JSON.stringify(expectedSchema)) {
+      throw new Error("Restore candidate schema does not match repository migrations.");
+    }
+  } finally {
+    expected.close();
+  }
 }
 
 function backupFilename(databasePath: string, label: string, now: Date): string {
