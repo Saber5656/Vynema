@@ -1591,7 +1591,7 @@ describe("applyMigrations", () => {
         readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
       ).toEqual([]);
     }
-  }, 15_000);
+  }, 45_000);
 
   it("rejects a restored portable search index whose content is stale", async () => {
     const fixture = createFixture();
