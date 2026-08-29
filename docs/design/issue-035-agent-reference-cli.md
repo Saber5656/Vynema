@@ -97,7 +97,11 @@ canonical = "VYNEMA1\n" + METHOD + "\n" + PATH_WITH_QUERY + "\n" + TIMESTAMP + "
 signature = base64(ed25519_sign(privateKey, utf8(canonical)))
 ```
 
-- `METHOD` uppercase; `PATH_WITH_QUERY` starts with `/api/...`, no origin; `TIMESTAMP` = seconds since epoch, decimal string; `NONCE` = `crypto.randomUUID()`; `BODY_SHA256_HEX` = lowercase hex SHA-256 of the exact request body bytes (empty body = hash of empty string).
+- `METHOD` uppercase; `PATH_WITH_QUERY` starts with `/api/...`, has no origin, and MUST equal
+  `new URL(path, dummyOrigin).pathname + search` byte-for-byte so dot segments, backslashes,
+  spaces, raw non-ASCII, and other parser rewrites are rejected in favor of canonical wire bytes;
+  `TIMESTAMP` = seconds since epoch, decimal string; `NONCE` = `crypto.randomUUID()`;
+  `BODY_SHA256_HEX` = lowercase hex SHA-256 of the exact request body bytes (empty body = hash of empty string).
 - Headers emitted: `x-vynema-agent-id`, `x-vynema-key-id`, `x-vynema-timestamp`, `x-vynema-nonce`, `x-vynema-content-sha256`, `x-vynema-signature`.
 - Export pure function `buildSignedHeaders(input: {method, path, body, agentId, keyId, privateKey, now?, nonce?}): Record<string,string>` — `now`/`nonce` injectable for deterministic tests.
 
