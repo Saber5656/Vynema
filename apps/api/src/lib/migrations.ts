@@ -85,6 +85,10 @@ type TableListRow = {
   type: string;
 };
 
+type ApplicationIdPragma = {
+  application_id: number;
+};
+
 export function detectMigrationCapabilities(database: Database): MigrationCapabilities {
   const row = database
     .prepare("SELECT sqlite_compileoption_used('ENABLE_FTS5') AS enabled")
@@ -160,6 +164,24 @@ function readUserVersion(database: Database): number {
   return pragma.user_version;
 }
 
+function assertPristineVersionZeroDatabase(database: Database, currentVersion: number): void {
+  if (currentVersion !== 0) {
+    return;
+  }
+
+  const applicationId = database.prepare("PRAGMA application_id").get() as
+    ApplicationIdPragma | undefined;
+  const schemaObject = database
+    .prepare("SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name LIMIT 1")
+    .get() as { name: string } | undefined;
+
+  if (applicationId?.application_id !== 0 || schemaObject) {
+    throw new Error(
+      "A migration version 0 database must be a pristine SQLite database with application_id 0.",
+    );
+  }
+}
+
 export function discoverMigrations(directory: string): Migration[] {
   const migrations: Migration[] = [];
 
@@ -225,6 +247,7 @@ export function getMigrationStatus(
 ): MigrationStatus {
   assertRuntimeCompatibleSchema(database);
   const currentVersion = readUserVersion(database);
+  assertPristineVersionZeroDatabase(database, currentVersion);
   const migrations = discoverMigrations(migrationsDirectory);
   const latestVersion = migrations.at(-1)?.version ?? 0;
 

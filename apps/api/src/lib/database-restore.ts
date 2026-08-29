@@ -2,12 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import {
-  assertDatabaseIntegrity,
-  backupDatabase,
-  openDatabase,
-  type Database,
-} from "./database.js";
+import { assertDatabaseIntegrity, backupDatabase, openDatabase } from "./database.js";
 import {
   assertCanonicalMigratedSchema,
   createTimestampedBackup,
@@ -32,27 +27,6 @@ export function removeDatabaseSidecars(path: string): void {
   rmSync(`${path}-journal`, { force: true });
 }
 
-function assertPristineVersionZeroDatabase(
-  database: Database,
-  migrationStatus: MigrationStatus,
-): void {
-  if (migrationStatus.currentVersion !== 0) {
-    return;
-  }
-
-  const applicationId = database.prepare("PRAGMA application_id").get() as
-    { application_id: number } | undefined;
-  const schemaObject = database
-    .prepare("SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name LIMIT 1")
-    .get() as { name: string } | undefined;
-
-  if (applicationId?.application_id !== 0 || schemaObject) {
-    throw new Error(
-      "A migration version 0 restore source must be a pristine SQLite database with application_id 0.",
-    );
-  }
-}
-
 function validateRestoreCandidate(path: string, migrationsDirectory: string): MigrationStatus {
   if (!existsSync(path) || !statSync(path).isFile()) {
     throw new Error(`Backup file does not exist: ${path}`);
@@ -63,7 +37,6 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
   try {
     assertDatabaseIntegrity(database);
     const migrationStatus = getMigrationStatus(database, migrationsDirectory);
-    assertPristineVersionZeroDatabase(database, migrationStatus);
     assertCanonicalMigratedSchema(database, migrationsDirectory, migrationStatus.currentVersion);
     return migrationStatus;
   } finally {

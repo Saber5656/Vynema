@@ -159,6 +159,78 @@ describe("applyMigrations", () => {
     ]);
   });
 
+  it("rejects non-pristine version-zero databases before backup or first migration", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_probe.sql"),
+      "CREATE TABLE migration_probe (id INTEGER PRIMARY KEY); -- recovery: restore backup",
+    );
+    fixture.database.close();
+    database = undefined;
+
+    const candidates = [
+      {
+        path: join(fixtureDirectory, "unrelated-v0.sqlite"),
+        configure(candidate: Database): void {
+          candidate.exec("CREATE TABLE unrelated (id INTEGER)");
+        },
+      },
+      {
+        path: join(fixtureDirectory, "foreign-application-v0.sqlite"),
+        configure(candidate: Database): void {
+          candidate.exec("PRAGMA application_id = 1448234573");
+        },
+      },
+      {
+        path: join(fixtureDirectory, "sqlite-like-name-v0.sqlite"),
+        configure(candidate: Database): void {
+          candidate.exec("CREATE TABLE sqliteXunrelated (id INTEGER)");
+        },
+      },
+    ];
+
+    for (const candidateFixture of candidates) {
+      const candidate = openDatabase(candidateFixture.path);
+      candidateFixture.configure(candidate);
+      candidate.close();
+      const bytesBefore = readFileSync(candidateFixture.path);
+      const migrationTarget = openDatabase(candidateFixture.path);
+      const backupDirectory = `${candidateFixture.path}.backups`;
+
+      try {
+        await expect(
+          applyMigrationsWithBackup(
+            migrationTarget,
+            candidateFixture.path,
+            fixture.migrationsDirectory,
+            backupDirectory,
+          ),
+        ).rejects.toThrow(
+          "A migration version 0 database must be a pristine SQLite database with application_id 0.",
+        );
+        expect(migrationTarget.prepare("PRAGMA user_version").get()).toEqual({ user_version: 0 });
+        expect(
+          migrationTarget
+            .prepare(
+              "SELECT name FROM sqlite_schema WHERE name IN ('migration_probe', 'schema_migrations') ORDER BY name",
+            )
+            .all(),
+        ).toEqual([]);
+      } finally {
+        migrationTarget.close();
+      }
+
+      expect(readFileSync(candidateFixture.path)).toEqual(bytesBefore);
+      expect(existsSync(backupDirectory)).toBe(false);
+    }
+  });
+
   it("rolls back a failed migration without advancing user_version", () => {
     const fixture = createFixture();
     writeFileSync(
@@ -393,7 +465,7 @@ describe("applyMigrations", () => {
           backupPath: candidateFixture.path,
           migrationsDirectory: fixture.migrationsDirectory,
         }),
-      ).rejects.toThrow("migration version 0 restore source must be a pristine SQLite database");
+      ).rejects.toThrow("migration version 0 database must be a pristine SQLite database");
       expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
       expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
         [],

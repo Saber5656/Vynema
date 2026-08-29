@@ -143,6 +143,9 @@ Migrations are forward-only and contiguous from `0001`. The runner records each
 applied filename and SHA-256 in its internal `schema_migrations` ledger and
 fails closed if that ledger, `PRAGMA user_version`, an applied file, or the
 installed table/index/trigger schema drifts from the repository migrations.
+Before the first migration, a version-zero database must have
+`PRAGMA application_id = 0` and no non-SQLite schema objects; otherwise status
+and migration fail before creating a backup or executing migration SQL.
 Restore validation builds the expected schema for the candidate's version and
 search mode; SQLite-reported virtual-table shadow objects are excluded, while
 all repository-owned schema objects must match exactly.
