@@ -544,6 +544,194 @@ describe("canonical schema", () => {
     ).toThrow();
   });
 
+  it("rejects BLOB storage for token and SHA-256 fields", () => {
+    insertAgentChannel();
+    insertUser();
+
+    const digestBlob = Buffer.from("a".repeat(64));
+    const insertIntentWithDigests = database.prepare(
+      [
+        "INSERT INTO upload_intents (",
+        "id, agent_id, channel_id, declared_video_bytes, declared_video_sha256,",
+        "declared_thumbnail_bytes, declared_thumbnail_sha256, declared_thumbnail_mime,",
+        "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join(" "),
+    );
+
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          "ses_33333333-3333-4333-8333-333333333333",
+          digestBlob,
+          "usr_11111111-1111-4111-8111-111111111111",
+          1_000,
+          2_000,
+          1_000,
+        ),
+    ).toThrow();
+    expect(() =>
+      insertIntentWithDigests.run(
+        "int_11111111-1111-4111-8111-111111111111",
+        "agt_111111111111",
+        "chn_11111111-1111-4111-8111-111111111111",
+        VIDEO_BYTES.length,
+        digestBlob,
+        null,
+        null,
+        null,
+        "video/mp4",
+        60,
+        "BLOB video digest",
+        "{}",
+        1_000,
+        100_000,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertIntentWithDigests.run(
+        "int_22222222-2222-4222-8222-222222222222",
+        "agt_111111111111",
+        "chn_11111111-1111-4111-8111-111111111111",
+        VIDEO_BYTES.length,
+        VIDEO_HASH,
+        THUMBNAIL_BYTES.length,
+        digestBlob,
+        "image/png",
+        "video/mp4",
+        60,
+        "BLOB thumbnail digest",
+        "{}",
+        1_000,
+        100_000,
+      ),
+    ).toThrow();
+
+    insertIntent("int_33333333-3333-4333-8333-333333333333");
+    expect(() =>
+      database
+        .prepare(
+          [
+            "INSERT INTO upload_capabilities (",
+            "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
+            "expected_mime, expires_at, created_at",
+            ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
+          ].join(" "),
+        )
+        .run(
+          "cap_11111111-1111-4111-8111-111111111111",
+          "int_33333333-3333-4333-8333-333333333333",
+          digestBlob,
+          VIDEO_BYTES.length,
+          VIDEO_HASH,
+          90_000,
+          1_100,
+        ),
+    ).toThrow();
+
+    try {
+      database.exec("PRAGMA ignore_check_constraints = ON");
+      insertIntentWithDigests.run(
+        "int_44444444-4444-4444-8444-444444444444",
+        "agt_111111111111",
+        "chn_11111111-1111-4111-8111-111111111111",
+        VIDEO_BYTES.length,
+        digestBlob,
+        null,
+        null,
+        null,
+        "video/mp4",
+        60,
+        "Seed invalid parent digest",
+        "{}",
+        1_000,
+        100_000,
+      );
+    } finally {
+      database.exec("PRAGMA ignore_check_constraints = OFF");
+    }
+
+    const insertBlobCapability = database.prepare(
+      [
+        "INSERT INTO upload_capabilities (",
+        "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
+        "expected_mime, expires_at, created_at",
+        ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
+      ].join(" "),
+    );
+    expect(() =>
+      insertBlobCapability.run(
+        "cap_22222222-2222-4222-8222-222222222222",
+        "int_44444444-4444-4444-8444-444444444444",
+        "b".repeat(64),
+        VIDEO_BYTES.length,
+        digestBlob,
+        90_000,
+        1_100,
+      ),
+    ).toThrow();
+
+    try {
+      database.exec("PRAGMA ignore_check_constraints = ON");
+      insertBlobCapability.run(
+        "cap_33333333-3333-4333-8333-333333333333",
+        "int_44444444-4444-4444-8444-444444444444",
+        "c".repeat(64),
+        VIDEO_BYTES.length,
+        digestBlob,
+        90_000,
+        1_100,
+      );
+      database
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+        .run(1_200, "cap_33333333-3333-4333-8333-333333333333");
+    } finally {
+      database.exec("PRAGMA ignore_check_constraints = OFF");
+    }
+
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO media_blobs (id, intent_id, kind, content, size_bytes, sha256, mime, created_at) VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?)",
+        )
+        .run(
+          "blob_11111111-1111-4111-8111-111111111111",
+          "int_44444444-4444-4444-8444-444444444444",
+          VIDEO_BYTES,
+          VIDEO_BYTES.length,
+          digestBlob,
+          1_300,
+        ),
+    ).toThrow();
+    expect(() =>
+      database
+        .prepare(
+          [
+            "INSERT INTO videos (",
+            "id, intent_id, agent_id, channel_id, title, duration_seconds, size_bytes,",
+            "sha256, provenance_json, created_at, updated_at",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ].join(" "),
+        )
+        .run(
+          "vid_11111111-1111-4111-8111-111111111111",
+          "int_33333333-3333-4333-8333-333333333333",
+          "agt_111111111111",
+          "chn_11111111-1111-4111-8111-111111111111",
+          "BLOB video digest",
+          60,
+          VIDEO_BYTES.length,
+          digestBlob,
+          "{}",
+          2_000,
+          2_000,
+        ),
+    ).toThrow();
+  });
+
   it("binds intent channels to their owning agents and freezes issued scope", () => {
     insertAgentChannel();
     insertAgentChannel(

@@ -14,7 +14,7 @@ CREATE TABLE users (
 CREATE TABLE sessions (
   id TEXT NOT NULL PRIMARY KEY,
   token_hash TEXT NOT NULL UNIQUE           -- hex sha256 of the cookie token; raw token never stored
-    CHECK (length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'),
+    CHECK (typeof(token_hash) = 'text' AND length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'),
   user_id TEXT NOT NULL REFERENCES users(id),
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,
@@ -87,12 +87,14 @@ CREATE TABLE upload_intents (
   expires_at INTEGER NOT NULL,              -- created_at + 15 min
   finalized_at INTEGER,
   CHECK (declared_video_bytes >= 1024),
-  CHECK (length(declared_video_sha256) = 64 AND declared_video_sha256 NOT GLOB '*[^0-9a-f]*'),
+  CHECK (typeof(declared_video_sha256) = 'text' AND length(declared_video_sha256) = 64
+    AND declared_video_sha256 NOT GLOB '*[^0-9a-f]*'),
   CHECK (
     (declared_thumbnail_bytes IS NULL AND declared_thumbnail_sha256 IS NULL AND declared_thumbnail_mime IS NULL)
     OR
     (declared_thumbnail_bytes IS NOT NULL AND declared_thumbnail_bytes > 0
-      AND declared_thumbnail_sha256 IS NOT NULL AND length(declared_thumbnail_sha256) = 64
+      AND declared_thumbnail_sha256 IS NOT NULL AND typeof(declared_thumbnail_sha256) = 'text'
+      AND length(declared_thumbnail_sha256) = 64
       AND declared_thumbnail_sha256 NOT GLOB '*[^0-9a-f]*'
       AND declared_thumbnail_mime IS NOT NULL
       AND declared_thumbnail_mime IN ('image/jpeg','image/png'))
@@ -108,9 +110,11 @@ CREATE TABLE upload_capabilities (
   intent_id TEXT NOT NULL REFERENCES upload_intents(id),
   kind TEXT NOT NULL CHECK (kind IN ('video','thumbnail')),
   token_sha256 TEXT NOT NULL UNIQUE
-    CHECK (length(token_sha256) = 64 AND token_sha256 NOT GLOB '*[^0-9a-f]*'),
+    CHECK (typeof(token_sha256) = 'text' AND length(token_sha256) = 64
+      AND token_sha256 NOT GLOB '*[^0-9a-f]*'),
   expected_size_bytes INTEGER NOT NULL CHECK (expected_size_bytes > 0),
-  expected_sha256 TEXT NOT NULL CHECK (length(expected_sha256) = 64 AND expected_sha256 NOT GLOB '*[^0-9a-f]*'),
+  expected_sha256 TEXT NOT NULL CHECK (typeof(expected_sha256) = 'text'
+    AND length(expected_sha256) = 64 AND expected_sha256 NOT GLOB '*[^0-9a-f]*'),
   expected_mime TEXT NOT NULL,
   expires_at INTEGER NOT NULL,
   claimed_at INTEGER,
@@ -192,7 +196,8 @@ CREATE TABLE media_blobs (
   kind TEXT NOT NULL CHECK (kind IN ('video','thumbnail')),
   content BLOB NOT NULL,
   size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
-  sha256 TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK (typeof(sha256) = 'text' AND length(sha256) = 64
+    AND sha256 NOT GLOB '*[^0-9a-f]*'),
   mime TEXT NOT NULL,
   created_at INTEGER NOT NULL,
   UNIQUE(intent_id, kind),
@@ -229,7 +234,8 @@ CREATE TABLE videos (
   description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 5000),
   duration_seconds INTEGER NOT NULL,        -- agent-declared, not verified in MVP
   size_bytes INTEGER NOT NULL,              -- verified against the stored object at finalize
-  sha256 TEXT NOT NULL,
+  sha256 TEXT NOT NULL CHECK (typeof(sha256) = 'text' AND length(sha256) = 64
+    AND sha256 NOT GLOB '*[^0-9a-f]*'),
   ai_generated INTEGER NOT NULL DEFAULT 1 CHECK (ai_generated = 1), -- always 1 in MVP (FR-008)
   provenance_json TEXT NOT NULL,            -- copied from intent (FR-009)
   video_blob_id TEXT REFERENCES media_blobs(id),      -- immutable development media
