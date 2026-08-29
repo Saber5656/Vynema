@@ -69,7 +69,7 @@ The fields are defined as follows:
 | Field | Exact rule |
 |---|---|
 | `METHOD` | Uppercase HTTP method. |
-| `PATH_WITH_QUERY` | Exact `/api/...` pathname plus query sent on the wire; no origin, decoding, re-encoding, slash normalization, or fragment. |
+| `PATH_WITH_QUERY` | Exact `/api/...` WHATWG URL-canonical pathname plus query sent on the wire; no origin, decoding, re-encoding, slash normalization, or fragment. Literal dot segments, backslashes, spaces, and non-ASCII characters are rejected because URL parsing rewrites them; supply their canonical path or percent-encoded wire form. |
 | `TIMESTAMP` | Unix seconds as a 1–12 digit decimal string. |
 | `NONCE` | A new value for every request, at most 64 characters; UUID v4 is recommended. |
 | `BODY_SHA256_HEX` | Lowercase SHA-256 hex of the exact request body bytes. The empty body hash is `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`. |
@@ -118,7 +118,8 @@ Use `--key-id` to require a known registered key ID and fail if the local key di
 `--timestamp` and `--nonce` for real requests so current Unix seconds and a random UUID are used.
 Those options exist only for deterministic testing and debugging. The body bytes later sent on the
 wire must be byte-for-byte identical to the bytes supplied to `sign`, and the sent path plus query
-must exactly match `--path`.
+must exactly match `--path`. The CLI parses `--path` against a dummy origin and requires
+`url.pathname + url.search` to remain byte-for-byte unchanged, matching the server verifier.
 
 ## Public deterministic vectors
 

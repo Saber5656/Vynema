@@ -1,5 +1,6 @@
 import { createHash, randomUUID, sign as signBytes } from "node:crypto";
 import type { KeyObject } from "node:crypto";
+import { URL } from "node:url";
 
 export const SIGNING_SCHEME = "VYNEMA1";
 
@@ -58,6 +59,13 @@ function assertCanonicalPath(path: string): void {
   if (!path.startsWith("/api/") || path.includes("#")) {
     throw new Error(
       "Path with query must start with /api/ and must not contain an origin or fragment.",
+    );
+  }
+
+  const parsed = new URL(path, "https://vynema.invalid");
+  if (`${parsed.pathname}${parsed.search}` !== path) {
+    throw new Error(
+      "Path with query must already use the URL-canonical pathname and query bytes sent on the wire.",
     );
   }
 }

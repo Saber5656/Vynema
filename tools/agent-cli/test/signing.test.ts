@@ -192,6 +192,23 @@ describe("canonical VYNEMA1 signing", () => {
     expect(() => buildCanonicalString({ ...valid, path: "/api/agent#fragment" })).toThrow(
       /fragment/,
     );
+    for (const rewrittenPath of [
+      "/api/agent/../upload-intents",
+      "/api/agent\\upload-intents",
+      "/api/agent/upload intents",
+      "/api/agent/投稿",
+      "/api/agent/upload-intents?title=hello world",
+    ]) {
+      expect(() => buildCanonicalString({ ...valid, path: rewrittenPath })).toThrow(
+        /URL-canonical/,
+      );
+    }
+    expect(
+      buildCanonicalString({
+        ...valid,
+        path: "/api/agent/%E6%8A%95%E7%A8%BF?title=hello%20world",
+      }),
+    ).toContain("/api/agent/%E6%8A%95%E7%A8%BF?title=hello%20world");
     expect(() => buildCanonicalString({ ...valid, nonce: "line1\nline2" })).toThrow(/single-line/);
     expect(() => buildCanonicalString({ ...valid, nonce: "nonce\u0000suffix" })).toThrow(
       /single-line/,
