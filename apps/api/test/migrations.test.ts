@@ -56,6 +56,18 @@ function createFixture(): { database: Database; migrationsDirectory: string } {
   return { database, migrationsDirectory };
 }
 
+function getCanonicalTriggerSql(target: Database, name: string): string {
+  const trigger = target
+    .prepare("SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = ?")
+    .get(name) as { sql: string } | undefined;
+
+  if (!trigger?.sql) {
+    throw new Error(`Canonical trigger ${name} was not installed.`);
+  }
+
+  return trigger.sql;
+}
+
 function insertPublishedVideoWithApproval(target: Database): {
   agentId: string;
   blobId: string;
@@ -786,15 +798,10 @@ describe("applyMigrations", () => {
     try {
       expect(applyMigrations(canonicalSource, repositoryMigrationsDirectory)).toEqual([1, 2]);
       ({ videoId } = insertPublishedVideoWithApproval(canonicalSource));
-      const trigger = canonicalSource
-        .prepare(
-          "SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'videos_media_refs_update'",
-        )
-        .get() as { sql: string } | undefined;
-      if (!trigger?.sql) {
-        throw new Error("Canonical video media-reference trigger was not installed.");
-      }
-      mediaReferenceTriggerSql = trigger.sql;
+      mediaReferenceTriggerSql = getCanonicalTriggerSql(
+        canonicalSource,
+        "videos_media_refs_update",
+      );
     } finally {
       canonicalSource.close();
     }
@@ -838,6 +845,247 @@ describe("applyMigrations", () => {
         candidate.exec("DROP TRIGGER videos_media_refs_update");
         tamperingCase.tamper(candidate);
         candidate.exec(mediaReferenceTriggerSql);
+        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+          currentVersion: 2,
+          latestVersion: 2,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      const candidateBytesBefore = readFileSync(candidatePath);
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: databasePath,
+          backupPath: candidatePath,
+          migrationsDirectory: repositoryMigrationsDirectory,
+        }),
+      ).rejects.toThrow(tamperingCase.expectedViolation);
+
+      expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+      expect(readFileSync(candidatePath)).toEqual(candidateBytesBefore);
+      expect(existsSync(join(fixtureDirectory, "backups"))).toBe(false);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
+    }
+  });
+
+  it("rejects restored upload provenance corrupted while canonical guards were absent", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const canonicalSourcePath = join(fixtureDirectory, "canonical-upload-provenance.sqlite");
+    const validRestorePath = join(fixtureDirectory, "valid-upload-provenance.sqlite");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2]);
+    fixture.database.close();
+    database = undefined;
+    const activeBytesBefore = readFileSync(databasePath);
+
+    const triggerNames = [
+      "upload_intent_declaration_immutable",
+      "upload_capability_complete_requires_blob",
+      "upload_capability_scope_immutable",
+      "upload_capability_state_monotonic",
+    ] as const;
+    const canonicalTriggerSql = new Map<string, string>();
+    const canonicalSource = openDatabase(canonicalSourcePath);
+    let intentId = "";
+    const unusedIntentId = "int_restore_unused_capability";
+    try {
+      expect(applyMigrations(canonicalSource, repositoryMigrationsDirectory)).toEqual([1, 2]);
+      ({ intentId } = insertPublishedVideoWithApproval(canonicalSource));
+      canonicalSource
+        .prepare(
+          "UPDATE upload_capabilities SET used_at = ? WHERE intent_id = ? AND kind = 'video'",
+        )
+        .run(1_400, intentId);
+      canonicalSource
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(1_500, intentId);
+      canonicalSource
+        .prepare(
+          [
+            "INSERT INTO upload_intents (",
+            "id, agent_id, channel_id, declared_video_bytes, declared_video_sha256,",
+            "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at",
+            ") VALUES (?, ?, ?, ?, ?, 'video/mp4', ?, ?, '{}', ?, ?)",
+          ].join(" "),
+        )
+        .run(
+          unusedIntentId,
+          "agt_abcdef123456",
+          "chn_restore_publication",
+          RESTORE_VIDEO_BYTES.length,
+          "d".repeat(64),
+          30,
+          "Unused restore capability",
+          1_000,
+          100_000,
+        );
+      canonicalSource
+        .prepare(
+          [
+            "INSERT INTO upload_capabilities (",
+            "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
+            "expected_mime, expires_at, created_at",
+            ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
+          ].join(" "),
+        )
+        .run(
+          "cap_restore_unused",
+          unusedIntentId,
+          "e".repeat(64),
+          RESTORE_VIDEO_BYTES.length,
+          "d".repeat(64),
+          90_000,
+          1_100,
+        );
+      canonicalSource
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE intent_id = ?")
+        .run(1_200, unusedIntentId);
+
+      for (const triggerName of triggerNames) {
+        canonicalTriggerSql.set(triggerName, getCanonicalTriggerSql(canonicalSource, triggerName));
+      }
+    } finally {
+      canonicalSource.close();
+    }
+
+    const canonicalSourceBytes = readFileSync(canonicalSourcePath);
+    const validRestoreResult = await restoreDatabaseFromBackup({
+      activeDatabasePath: validRestorePath,
+      backupPath: canonicalSourcePath,
+      migrationsDirectory: repositoryMigrationsDirectory,
+    });
+    expect(validRestoreResult.safetyBackupPath).toBeNull();
+    expect(validRestoreResult.migrationStatus).toMatchObject({
+      currentVersion: 2,
+      latestVersion: 2,
+      pendingMigrations: [],
+    });
+    expect(readFileSync(canonicalSourcePath)).toEqual(canonicalSourceBytes);
+    const validRestore = openDatabase(validRestorePath);
+    try {
+      expect(
+        validRestore
+          .prepare(
+            "SELECT i.status, c.used_at FROM upload_intents i JOIN upload_capabilities c ON c.intent_id = i.id WHERE i.id = ? AND c.kind = 'video'",
+          )
+          .get(intentId),
+      ).toEqual({ status: "finalized", used_at: 1_400 });
+    } finally {
+      validRestore.close();
+    }
+
+    const tamperingCases: {
+      candidateName: string;
+      droppedTriggers: (typeof triggerNames)[number][];
+      expectedViolation: string;
+      tamper: (candidate: Database) => void;
+    }[] = [
+      {
+        candidateName: "stale-capability-declaration.sqlite",
+        droppedTriggers: ["upload_intent_declaration_immutable"],
+        expectedViolation: "does not match its intent declaration",
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE upload_intents SET declared_video_sha256 = ? WHERE id = ?")
+            .run("c".repeat(64), intentId);
+        },
+      },
+      {
+        candidateName: "stale-blob-capability-metadata.sqlite",
+        droppedTriggers: [
+          "upload_intent_declaration_immutable",
+          "upload_capability_scope_immutable",
+        ],
+        expectedViolation: "does not match a claimed upload capability",
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE upload_intents SET declared_video_sha256 = ? WHERE id = ?")
+            .run("c".repeat(64), intentId);
+          candidate
+            .prepare(
+              "UPDATE upload_capabilities SET expected_sha256 = ? WHERE intent_id = ? AND kind = 'video'",
+            )
+            .run("c".repeat(64), intentId);
+        },
+      },
+      {
+        candidateName: "unclaimed-blob-capability.sqlite",
+        droppedTriggers: ["upload_capability_state_monotonic"],
+        expectedViolation: "does not match a claimed upload capability",
+        tamper: (candidate) => {
+          candidate
+            .prepare(
+              "UPDATE upload_capabilities SET claimed_at = NULL, used_at = NULL WHERE intent_id = ? AND kind = 'video'",
+            )
+            .run(intentId);
+        },
+      },
+      {
+        candidateName: "used-after-capability-expiry.sqlite",
+        droppedTriggers: [
+          "upload_capability_complete_requires_blob",
+          "upload_capability_state_monotonic",
+        ],
+        expectedViolation: "was used outside its authorization window",
+        tamper: (candidate) => {
+          candidate
+            .prepare(
+              "UPDATE upload_capabilities SET used_at = ? WHERE intent_id = ? AND kind = 'video'",
+            )
+            .run(95_000, intentId);
+        },
+      },
+      {
+        candidateName: "used-after-intent-expiry.sqlite",
+        droppedTriggers: [],
+        expectedViolation: "was used outside its authorization window",
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE upload_intents SET expires_at = ? WHERE id = ?")
+            .run(1_300, intentId);
+        },
+      },
+      {
+        candidateName: "used-capability-without-blob.sqlite",
+        droppedTriggers: ["upload_capability_complete_requires_blob"],
+        expectedViolation: "used upload capability cap_restore_unused has no matching media blob",
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE upload_capabilities SET used_at = ? WHERE intent_id = ?")
+            .run(1_400, unusedIntentId);
+        },
+      },
+    ];
+
+    for (const tamperingCase of tamperingCases) {
+      const candidatePath = join(fixtureDirectory, tamperingCase.candidateName);
+      copyFileSync(canonicalSourcePath, candidatePath);
+      const candidate = openDatabase(candidatePath);
+      try {
+        for (const triggerName of tamperingCase.droppedTriggers) {
+          candidate.exec(`DROP TRIGGER ${triggerName}`);
+        }
+        tamperingCase.tamper(candidate);
+        for (const triggerName of tamperingCase.droppedTriggers) {
+          const triggerSql = canonicalTriggerSql.get(triggerName);
+          if (!triggerSql) {
+            throw new Error(`Missing captured SQL for canonical trigger ${triggerName}.`);
+          }
+          candidate.exec(triggerSql);
+        }
         expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
           currentVersion: 2,
           latestVersion: 2,

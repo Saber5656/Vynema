@@ -40,6 +40,10 @@ type RestoredMediaBindingMismatchRow = {
   violation: string;
 };
 
+type RestoredUploadProvenanceMismatchRow = {
+  id: string;
+};
+
 type SearchIndexMismatchRow = {
   mismatched_rowid: number;
 };
@@ -78,6 +82,107 @@ function assertRestoredPublicationEvidence(database: Database): void {
   if (videoWithoutApproval) {
     throw new Error(
       `Restore candidate video ${videoWithoutApproval.id} is published or taken down without retained approval evidence.`,
+    );
+  }
+}
+
+function assertRestoredUploadProvenanceConsistency(database: Database): void {
+  const applicationTables = database
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('media_blobs', 'upload_capabilities', 'upload_intents') ORDER BY name",
+    )
+    .all() as SchemaTableRow[];
+
+  if (applicationTables.length !== 3) {
+    return;
+  }
+
+  const capabilityMismatch = database
+    .prepare(
+      [
+        "SELECT c.id FROM upload_capabilities c",
+        "WHERE (c.kind = 'video' AND NOT EXISTS (",
+        "SELECT 1 FROM upload_intents i WHERE i.id = c.intent_id",
+        "AND i.declared_video_bytes = c.expected_size_bytes",
+        "AND i.declared_video_sha256 = c.expected_sha256",
+        "AND i.declared_mime = c.expected_mime",
+        ")) OR (c.kind = 'thumbnail' AND NOT EXISTS (",
+        "SELECT 1 FROM upload_intents i WHERE i.id = c.intent_id",
+        "AND i.declared_thumbnail_bytes = c.expected_size_bytes",
+        "AND i.declared_thumbnail_sha256 = c.expected_sha256",
+        "AND i.declared_thumbnail_mime = c.expected_mime",
+        ")) ORDER BY c.id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as RestoredUploadProvenanceMismatchRow | undefined;
+
+  if (capabilityMismatch) {
+    throw new Error(
+      `Restore candidate upload capability ${capabilityMismatch.id} does not match its intent declaration.`,
+    );
+  }
+
+  // Blob insertion requires a created intent and an unused capability, but
+  // those are transition-time states: the intent may later be finalized and
+  // the capability marked used. Restore only replays the durable provenance
+  // binding and the claimed-state requirement that cannot legitimately revert.
+  const blobMismatch = database
+    .prepare(
+      [
+        "SELECT b.id FROM media_blobs b",
+        "WHERE NOT EXISTS (",
+        "SELECT 1 FROM upload_capabilities c",
+        "WHERE c.intent_id = b.intent_id AND c.kind = b.kind",
+        "AND c.claimed_at IS NOT NULL",
+        "AND c.expected_size_bytes = b.size_bytes",
+        "AND c.expected_sha256 = b.sha256 AND c.expected_mime = b.mime",
+        ") ORDER BY b.id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as RestoredUploadProvenanceMismatchRow | undefined;
+
+  if (blobMismatch) {
+    throw new Error(
+      `Restore candidate media blob ${blobMismatch.id} does not match a claimed upload capability.`,
+    );
+  }
+
+  const usedCapabilityOutsideAuthorizationWindow = database
+    .prepare(
+      [
+        "SELECT c.id FROM upload_capabilities c",
+        "WHERE c.used_at IS NOT NULL AND (",
+        "c.used_at > c.expires_at OR NOT EXISTS (",
+        "SELECT 1 FROM upload_intents i",
+        "WHERE i.id = c.intent_id AND i.expires_at >= c.used_at",
+        ")) ORDER BY c.id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as RestoredUploadProvenanceMismatchRow | undefined;
+
+  if (usedCapabilityOutsideAuthorizationWindow) {
+    throw new Error(
+      `Restore candidate used upload capability ${usedCapabilityOutsideAuthorizationWindow.id} was used outside its authorization window.`,
+    );
+  }
+
+  const usedCapabilityWithoutBlob = database
+    .prepare(
+      [
+        "SELECT c.id FROM upload_capabilities c",
+        "WHERE c.used_at IS NOT NULL AND NOT EXISTS (",
+        "SELECT 1 FROM media_blobs b",
+        "WHERE b.intent_id = c.intent_id AND b.kind = c.kind",
+        "AND b.size_bytes = c.expected_size_bytes",
+        "AND b.sha256 = c.expected_sha256 AND b.mime = c.expected_mime",
+        ") ORDER BY c.id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as RestoredUploadProvenanceMismatchRow | undefined;
+
+  if (usedCapabilityWithoutBlob) {
+    throw new Error(
+      `Restore candidate used upload capability ${usedCapabilityWithoutBlob.id} has no matching media blob.`,
     );
   }
 }
@@ -191,6 +296,7 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
     assertDatabaseIntegrity(database);
     const migrationStatus = getMigrationStatus(database, migrationsDirectory);
     assertCanonicalMigratedSchema(database, migrationsDirectory, migrationStatus.currentVersion);
+    assertRestoredUploadProvenanceConsistency(database);
     assertRestoredMediaBindingConsistency(database);
     assertRestoredPublicationEvidence(database);
     assertRestoredSearchIndexConsistency(database);
