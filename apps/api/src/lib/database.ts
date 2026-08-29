@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, rmSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, rmdirSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { basename, dirname, join } from "node:path";
 import type { DatabaseSync as NodeDatabaseSync } from "node:sqlite";
 
 export type Database = NodeDatabaseSync;
@@ -62,28 +62,48 @@ export function assertDatabaseIntegrity(database: Database): void {
 }
 
 export function backupDatabase(database: Database, destinationPath: string): Promise<void> {
-  mkdirSync(dirname(destinationPath), { recursive: true });
+  const destinationDirectory = dirname(destinationPath);
+  mkdirSync(destinationDirectory, { recursive: true });
 
   if (existsSync(destinationPath)) {
     throw new Error(`Backup destination already exists: ${destinationPath}`);
   }
 
+  const temporaryDirectory = mkdtempSync(
+    join(destinationDirectory, `.${basename(destinationPath)}.bak.temporary-`),
+  );
+  const temporaryPath = join(temporaryDirectory, "snapshot.sqlite");
+
   try {
     // VACUUM INTO is available in the SQLite bundled with every supported
     // Node 22 runtime. Unlike node:sqlite backup(), it does not require
     // Node 22.16+, and it still creates a transactionally consistent copy.
-    database.prepare("VACUUM INTO ?").run(destinationPath);
+    // Build and validate in an exclusively owned directory, then publish with
+    // a hard link so an existing destination is never overwritten.
+    database.prepare("VACUUM INTO ?").run(temporaryPath);
 
-    const backupCopy = openDatabase(destinationPath);
+    const backupCopy = openDatabase(temporaryPath);
 
     try {
       assertDatabaseIntegrity(backupCopy);
     } finally {
       backupCopy.close();
     }
-  } catch (error) {
-    rmSync(destinationPath, { force: true });
-    throw error;
+
+    try {
+      linkSync(temporaryPath, destinationPath);
+    } catch (error) {
+      if (existsSync(destinationPath)) {
+        throw new Error(`Backup destination already exists: ${destinationPath}`, {
+          cause: error,
+        });
+      }
+
+      throw error;
+    }
+  } finally {
+    rmSync(temporaryPath, { force: true });
+    rmdirSync(temporaryDirectory);
   }
 
   return Promise.resolve();

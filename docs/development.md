@@ -158,8 +158,11 @@ Never edit, rename, delete, or roll back an applied migration. To recover from a
 failed local migration, either restore the printed pre-migration backup,
 correct an unapplied SQL file, or add the next numbered fix-forward migration.
 Every migration must contain a `-- recovery:` note. Generated backup collision
-files and restore-temporary files are ignored by Git. Production backup,
-restore, migration, and retention procedures remain blocked on #42.
+files and restore-temporary files are ignored by Git. Backups are built and
+validated in an exclusively owned temporary directory, then atomically linked
+into place without overwrite; a concurrent loser never removes the winner's
+backup. Production backup, restore, migration, and retention procedures remain
+blocked on #42.
 
 The local test agent/channel/key fixture is intentionally absent. Issue #46
 adds it only after #35 finalizes the public signing vector; production
