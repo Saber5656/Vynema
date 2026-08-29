@@ -240,6 +240,10 @@ export function getMigrationStatus(
 
   verifyAppliedMigrationMetadata(database, migrations, currentVersion);
 
+  if (currentVersion > 0) {
+    assertCanonicalMigratedSchema(database, migrationsDirectory, currentVersion);
+  }
+
   return {
     currentVersion,
     latestVersion,
@@ -452,7 +456,7 @@ export function assertCanonicalMigratedSchema(
     const expectedSchema = readCanonicalSchemaObjects(expected);
 
     if (JSON.stringify(actualSchema) !== JSON.stringify(expectedSchema)) {
-      throw new Error("Restore candidate schema does not match repository migrations.");
+      throw new Error("Database schema does not match repository migrations.");
     }
   } finally {
     expected.close();

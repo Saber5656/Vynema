@@ -119,6 +119,46 @@ describe("applyMigrations", () => {
     );
   });
 
+  it("rejects active schema drift before reporting that no migrations are pending", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const backupDirectory = join(fixtureDirectory, "backups");
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_probe.sql"),
+      [
+        "CREATE TABLE probe (id INTEGER PRIMARY KEY);",
+        "CREATE TRIGGER probe_guard BEFORE DELETE ON probe BEGIN SELECT RAISE(ABORT, 'immutable'); END;",
+        "-- recovery: restore backup",
+      ].join("\n"),
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+
+    fixture.database.exec("DROP TRIGGER probe_guard");
+
+    expect(() => getMigrationStatus(fixture.database, fixture.migrationsDirectory)).toThrow(
+      "Database schema does not match repository migrations.",
+    );
+    await expect(
+      applyMigrationsWithBackup(
+        fixture.database,
+        databasePath,
+        fixture.migrationsDirectory,
+        backupDirectory,
+      ),
+    ).rejects.toThrow("Database schema does not match repository migrations.");
+    expect(existsSync(backupDirectory)).toBe(false);
+    expect(fixture.database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1 });
+    expect(fixture.database.prepare("SELECT version, name FROM schema_migrations").all()).toEqual([
+      { version: 1, name: "0001_probe.sql" },
+    ]);
+  });
+
   it("rolls back a failed migration without advancing user_version", () => {
     const fixture = createFixture();
     writeFileSync(
@@ -577,11 +617,9 @@ describe("applyMigrations", () => {
       const candidate = openDatabase(tamperedCandidate.path);
       try {
         candidate.exec(tamperedCandidate.sql);
-        expect(getMigrationStatus(candidate, fixture.migrationsDirectory)).toMatchObject({
-          currentVersion: 1,
-          latestVersion: 1,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, fixture.migrationsDirectory)).toThrow(
+          "Database schema does not match repository migrations.",
+        );
       } finally {
         candidate.close();
       }
