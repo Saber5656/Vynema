@@ -117,7 +117,7 @@ contract is fixed, but its vector-consumption integration and ready PR require
 - [x] #21 Checks-only CI (deployment remains blocked on #42)
 - [ ] #55 Admin audit, observability docs, runbooks, and ops status (#22B)
 - [ ] #29 Provider-independent IaC posture (provisioning blocked on #42)
-- [x] #36 Pre-alpha policy documentation baseline accepted by this close-out
+- [ ] #36 Pre-alpha policy documentation baseline (owner acceptance pending)
 - [ ] #23 Security review closed (owner sign-off)
 - [ ] #24 Launch readiness & go/no-go
 - [x] #1 requirements baseline accepted
@@ -139,7 +139,7 @@ stay unchecked.
 | #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | PR #60 and PR #59 prerequisites are satisfied; this close-out PR itself must merge | Accepted by this close-out; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
-| #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance and this close-out PR merge are the #36 closure gates. Counsel approval remains a #24 launch gate; #4/#13/#15/#16 runtime evidence is downstream implementation work | Accepted by this close-out; checked on merge |
+| #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance and this close-out PR merge are the #36 closure gates. Counsel approval remains a #24 launch gate; #4/#13/#15/#16 runtime evidence is downstream implementation work | Open dependency; unchecked until owner acceptance and this close-out PR merge |
 
 The technical foundation for the implementation waves is present on `main`.
 Issue #21 is complete without adding deployment, release, provider bindings, or
