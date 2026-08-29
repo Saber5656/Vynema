@@ -10,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, type Database } from "../src/lib/database.js";
@@ -22,6 +23,9 @@ import {
 
 let database: Database | undefined;
 let temporaryDirectory: string | undefined;
+const repositoryMigrationsDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
+const RESTORE_VIDEO_BYTES = Buffer.alloc(1024, 7);
+const RESTORE_VIDEO_SHA256 = "a".repeat(64);
 
 function createFixture(): { database: Database; migrationsDirectory: string } {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "vynema-migrations-"));
@@ -30,6 +34,125 @@ function createFixture(): { database: Database; migrationsDirectory: string } {
   database = openDatabase(join(temporaryDirectory, "database.sqlite"));
 
   return { database, migrationsDirectory };
+}
+
+function insertPublishedVideoWithApproval(target: Database): {
+  reviewId: string;
+  videoId: string;
+} {
+  const agentId = "agt_abcdef123456";
+  const channelId = "chn_restore_publication";
+  const intentId = "int_restore_publication";
+  const capabilityId = "cap_restore_publication";
+  const blobId = "blob_restore_publication";
+  const userId = "usr_restore_reviewer";
+  const videoId = "vid_restore_publication";
+  const reviewId = "rev_restore_publication";
+
+  target
+    .prepare(
+      "INSERT INTO agents (id, display_name, owner_contact, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(agentId, "Restore Agent", "@restore-owner", 1_000, 1_000);
+  target
+    .prepare(
+      "INSERT INTO channels (id, agent_id, slug, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    )
+    .run(channelId, agentId, "restore-channel", "Restore Channel", 1_000, 1_000);
+  target
+    .prepare(
+      "INSERT INTO users (id, github_id, github_login, display_name, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'reviewer', 'active', ?, ?)",
+    )
+    .run(userId, 9_001, "restore-reviewer", "Restore Reviewer", 1_000, 1_000);
+  target
+    .prepare(
+      [
+        "INSERT INTO upload_intents (",
+        "id, agent_id, channel_id, declared_video_bytes, declared_video_sha256,",
+        "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at",
+        ") VALUES (?, ?, ?, ?, ?, 'video/mp4', ?, ?, ?, ?, ?)",
+      ].join(" "),
+    )
+    .run(
+      intentId,
+      agentId,
+      channelId,
+      RESTORE_VIDEO_BYTES.length,
+      RESTORE_VIDEO_SHA256,
+      60,
+      "Restore publication evidence",
+      "{}",
+      1_000,
+      100_000,
+    );
+  target
+    .prepare(
+      [
+        "INSERT INTO upload_capabilities (",
+        "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
+        "expected_mime, expires_at, created_at",
+        ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
+      ].join(" "),
+    )
+    .run(
+      capabilityId,
+      intentId,
+      "b".repeat(64),
+      RESTORE_VIDEO_BYTES.length,
+      RESTORE_VIDEO_SHA256,
+      90_000,
+      1_100,
+    );
+  target
+    .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+    .run(1_200, capabilityId);
+  target
+    .prepare(
+      "INSERT INTO media_blobs (id, intent_id, kind, content, size_bytes, sha256, mime, created_at) VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?)",
+    )
+    .run(
+      blobId,
+      intentId,
+      RESTORE_VIDEO_BYTES,
+      RESTORE_VIDEO_BYTES.length,
+      RESTORE_VIDEO_SHA256,
+      1_300,
+    );
+  target
+    .prepare(
+      [
+        "INSERT INTO videos (",
+        "id, intent_id, agent_id, channel_id, title, duration_seconds, size_bytes,",
+        "sha256, provenance_json, video_blob_id, created_at, updated_at",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join(" "),
+    )
+    .run(
+      videoId,
+      intentId,
+      agentId,
+      channelId,
+      "Restore publication evidence",
+      60,
+      RESTORE_VIDEO_BYTES.length,
+      RESTORE_VIDEO_SHA256,
+      "{}",
+      blobId,
+      2_000,
+      2_000,
+    );
+  target
+    .prepare(
+      "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+    )
+    .run(reviewId, videoId, userId, "Approved before publication.", 2_500);
+  target
+    .prepare(
+      "UPDATE videos SET status = 'published', published_at = ?, updated_at = ? WHERE id = ?",
+    )
+    .run(3_000, 3_000, videoId);
+
+  return { reviewId, videoId };
 }
 
 afterEach(() => {
@@ -521,6 +644,65 @@ describe("applyMigrations", () => {
       ).toEqual([]);
     } finally {
       restored.close();
+    }
+  });
+
+  it("rejects a restored published video after its approval evidence is removed", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const candidatePath = join(fixtureDirectory, "published-without-approval.sqlite");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2]);
+    fixture.database.close();
+    database = undefined;
+    const activeBytesBefore = readFileSync(databasePath);
+
+    const candidate = openDatabase(candidatePath);
+    try {
+      expect(applyMigrations(candidate, repositoryMigrationsDirectory)).toEqual([1, 2]);
+      const { reviewId, videoId } = insertPublishedVideoWithApproval(candidate);
+      candidate.prepare("DELETE FROM moderation_reviews WHERE id = ?").run(reviewId);
+      expect(candidate.prepare("SELECT status FROM videos WHERE id = ?").get(videoId)).toEqual({
+        status: "published",
+      });
+      expect(candidate.prepare("SELECT COUNT(*) AS count FROM moderation_reviews").get()).toEqual({
+        count: 0,
+      });
+      expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+        currentVersion: 2,
+        latestVersion: 2,
+        pendingMigrations: [],
+      });
+    } finally {
+      candidate.close();
+    }
+
+    await expect(
+      restoreDatabaseFromBackup({
+        activeDatabasePath: databasePath,
+        backupPath: candidatePath,
+        migrationsDirectory: repositoryMigrationsDirectory,
+      }),
+    ).rejects.toThrow("published or taken down without retained approval evidence");
+
+    expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+    expect(existsSync(join(fixtureDirectory, "backups"))).toBe(false);
+    expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual([]);
+
+    const active = openDatabase(databasePath);
+    try {
+      expect(getMigrationStatus(active, repositoryMigrationsDirectory)).toMatchObject({
+        currentVersion: 2,
+        latestVersion: 2,
+        pendingMigrations: [],
+      });
+    } finally {
+      active.close();
     }
   });
 

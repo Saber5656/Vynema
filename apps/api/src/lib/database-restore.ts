@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-import { assertDatabaseIntegrity, backupDatabase, openDatabase } from "./database.js";
+import {
+  assertDatabaseIntegrity,
+  backupDatabase,
+  openDatabase,
+  type Database,
+} from "./database.js";
 import {
   assertCanonicalMigratedSchema,
   createTimestampedBackup,
@@ -21,10 +26,50 @@ export type RestoreDatabaseResult = {
   migrationStatus: MigrationStatus;
 };
 
+type SchemaTableRow = {
+  name: string;
+};
+
+type VideoWithoutApprovalRow = {
+  id: string;
+};
+
 export function removeDatabaseSidecars(path: string): void {
   rmSync(`${path}-shm`, { force: true });
   rmSync(`${path}-wal`, { force: true });
   rmSync(`${path}-journal`, { force: true });
+}
+
+function assertRestoredPublicationEvidence(database: Database): void {
+  const applicationTables = database
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('videos', 'moderation_reviews') ORDER BY name",
+    )
+    .all() as SchemaTableRow[];
+
+  if (applicationTables.length !== 2) {
+    return;
+  }
+
+  const videoWithoutApproval = database
+    .prepare(
+      [
+        "SELECT v.id FROM videos v",
+        "WHERE v.status IN ('published', 'taken_down')",
+        "AND NOT EXISTS (",
+        "SELECT 1 FROM moderation_reviews r",
+        "WHERE r.video_id = v.id AND r.decision = 'approved'",
+        ")",
+        "ORDER BY v.id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as VideoWithoutApprovalRow | undefined;
+
+  if (videoWithoutApproval) {
+    throw new Error(
+      `Restore candidate video ${videoWithoutApproval.id} is published or taken down without retained approval evidence.`,
+    );
+  }
 }
 
 function validateRestoreCandidate(path: string, migrationsDirectory: string): MigrationStatus {
@@ -38,6 +83,7 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
     assertDatabaseIntegrity(database);
     const migrationStatus = getMigrationStatus(database, migrationsDirectory);
     assertCanonicalMigratedSchema(database, migrationsDirectory, migrationStatus.currentVersion);
+    assertRestoredPublicationEvidence(database);
     return migrationStatus;
   } finally {
     database.close();

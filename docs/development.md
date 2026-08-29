@@ -130,6 +130,9 @@ pre-migration SQLite database: `PRAGMA application_id` must be `0` and
 unrelated SQLite database from being accepted merely because its
 `user_version` is still zero. The same check runs both before the safety
 backup and against the copied candidate.
+For the Vynema schema, every restored `published` or `taken_down` video must
+also retain at least one `moderation_reviews` row with `decision = 'approved'`;
+otherwise restore fails before a safety backup or active-database replacement.
 
 Reset the disposable local database only. The explicit `--yes` guard is
 required; an existing database is backed up before removal, and the fresh

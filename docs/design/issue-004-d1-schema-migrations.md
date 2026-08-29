@@ -589,7 +589,7 @@ runtime that cannot provide FTS5.
 | config load | `getConfig` returns typed values; deleting a key makes it throw `ConfigUnavailableError` |
 | quota integrity | non-integer/negative counters and non-integer ledger deltas fail; ledger records the identical `period_start`; daily rollover reconciles per period; double/insufficient release rolls back |
 | transaction helper | synchronous callback failure rolls back; a Promise-like object or callable function, including throwing `then` inspection, rolls back and invalidates its connection before a resumed microtask can write outside the transaction |
-| restore preflight | incompatible migration metadata, orphaned foreign keys, non-pristine version-zero databases, and migrated databases missing canonical tables/indexes/triggers are rejected without changing the active database; a pristine version-zero source is accepted; a live WAL source is restored from a transactionally consistent snapshot without losing committed rows |
+| restore preflight | incompatible migration metadata, orphaned foreign keys, non-pristine version-zero databases, migrated databases missing canonical tables/indexes/triggers, and published/taken-down videos without retained approval evidence are rejected without changing the active database; a pristine version-zero source is accepted; a live WAL source is restored from a transactionally consistent snapshot without losing committed rows |
 
 ### 7. Acceptance mapping & PR evidence
 
