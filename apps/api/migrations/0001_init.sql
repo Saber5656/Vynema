@@ -220,7 +220,7 @@ BEFORE INSERT ON media_blobs BEGIN
   ) THEN RAISE(ABORT, 'media blob metadata or capability mismatch') END;
 END;
 CREATE TRIGGER media_blob_immutable
-BEFORE UPDATE OF intent_id, kind, content, size_bytes, sha256, mime
+BEFORE UPDATE OF id, intent_id, kind, content, size_bytes, sha256, mime, created_at
 ON media_blobs BEGIN
   SELECT RAISE(ABORT, 'media blob is immutable');
 END;

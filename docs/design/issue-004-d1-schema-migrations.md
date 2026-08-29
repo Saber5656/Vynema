@@ -295,7 +295,7 @@ BEFORE INSERT ON media_blobs BEGIN
   ) THEN RAISE(ABORT, 'media blob metadata or capability mismatch') END;
 END;
 CREATE TRIGGER media_blob_immutable
-BEFORE UPDATE OF intent_id, kind, content, size_bytes, sha256, mime
+BEFORE UPDATE OF id, intent_id, kind, content, size_bytes, sha256, mime, created_at
 ON media_blobs BEGIN
   SELECT RAISE(ABORT, 'media blob is immutable');
 END;
@@ -589,7 +589,7 @@ runtime that cannot provide FTS5.
 | numeric storage class | non-integer upload declaration bytes/duration, capability expected bytes, media bytes, and video bytes/duration fail |
 | intent/capability metadata | JPEG and PNG declarations persist; partially-null thumbnail fields fail, including valid size/hash with null MIME; capability expected size/hash/MIME differing from its intent fails |
 | capability completion | `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
-| media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail |
+| media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail; stored media id and creation time cannot be updated |
 | BLOB length | `length(content) != size_bytes` fails |
 | video lifecycle | `ai_generated != 1`, direct publication, publication without an approval from a currently active reviewer/admin (including viewer or banned-user approvals), `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps fail |
 | purge FK behavior | deleting a referenced BLOB fails; eligible rejected purge clears references and deletes same-intent BLOB in one transaction; injected failure rolls all of it back |

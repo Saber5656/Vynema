@@ -1139,6 +1139,43 @@ describe("canonical schema", () => {
     ).toThrow();
   });
 
+  it("keeps stored media identity and creation time immutable", () => {
+    insertAgentChannel();
+    insertIntent("int_11111111-1111-4111-8111-111111111111");
+    insertCapability(
+      "int_11111111-1111-4111-8111-111111111111",
+      "video",
+      "cap_11111111-1111-4111-8111-111111111111",
+    );
+    insertBlob(
+      "int_11111111-1111-4111-8111-111111111111",
+      "video",
+      "blob_11111111-1111-4111-8111-111111111111",
+    );
+
+    expect(() =>
+      database
+        .prepare("UPDATE media_blobs SET id = ? WHERE id = ?")
+        .run(
+          "blob_22222222-2222-4222-8222-222222222222",
+          "blob_11111111-1111-4111-8111-111111111111",
+        ),
+    ).toThrow("media blob is immutable");
+    expect(() =>
+      database
+        .prepare("UPDATE media_blobs SET created_at = ? WHERE id = ?")
+        .run(9_999, "blob_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("media blob is immutable");
+    expect(
+      database
+        .prepare("SELECT id, created_at FROM media_blobs WHERE intent_id = ?")
+        .get("int_11111111-1111-4111-8111-111111111111"),
+    ).toEqual({
+      id: "blob_11111111-1111-4111-8111-111111111111",
+      created_at: 1_300,
+    });
+  });
+
   it("enforces publication lifecycle timestamps and retained media", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111");
