@@ -133,6 +133,10 @@ backup and against the copied candidate.
 For the Vynema schema, every restored `published` or `taken_down` video must
 also retain at least one `moderation_reviews` row with `decision = 'approved'`;
 otherwise restore fails before a safety backup or active-database replacement.
+Restore also verifies search-index content, not only its DDL: portable mode
+requires exact row/title/description parity with `videos`, while FTS5 runs its
+external-content `integrity-check` against `videos`. A stale index fails before
+the safety backup or active-database replacement.
 
 Reset the disposable local database only. The explicit `--yes` guard is
 required; an existing database is backed up before removal, and the fresh

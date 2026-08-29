@@ -18,7 +18,9 @@ import { restoreDatabaseFromBackup } from "../src/lib/database-restore.js";
 import {
   applyMigrations,
   applyMigrationsWithBackup,
+  detectMigrationCapabilities,
   getMigrationStatus,
+  getSearchIndexMode,
 } from "../src/lib/migrations.js";
 
 let database: Database | undefined;
@@ -26,6 +28,24 @@ let temporaryDirectory: string | undefined;
 const repositoryMigrationsDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
 const RESTORE_VIDEO_BYTES = Buffer.alloc(1024, 7);
 const RESTORE_VIDEO_SHA256 = "a".repeat(64);
+
+function runtimeHasFts5(): boolean {
+  const probe = openDatabase(":memory:");
+
+  try {
+    return detectMigrationCapabilities(probe).fts5;
+  } finally {
+    probe.close();
+  }
+}
+
+const RUNTIME_HAS_FTS5 = runtimeHasFts5();
+
+type SearchVideoRow = {
+  rowid: number;
+  title: string;
+  description: string;
+};
 
 function createFixture(): { database: Database; migrationsDirectory: string } {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "vynema-migrations-"));
@@ -153,6 +173,41 @@ function insertPublishedVideoWithApproval(target: Database): {
     .run(3_000, 3_000, videoId);
 
   return { reviewId, videoId };
+}
+
+async function expectStaleSearchRestoreRejection(options: {
+  activeBytesBefore: Buffer;
+  activeDatabasePath: string;
+  candidatePath: string;
+  fixtureDirectory: string;
+}): Promise<void> {
+  const candidateBytesBefore = readFileSync(options.candidatePath);
+
+  await expect(
+    restoreDatabaseFromBackup({
+      activeDatabasePath: options.activeDatabasePath,
+      backupPath: options.candidatePath,
+      migrationsDirectory: repositoryMigrationsDirectory,
+    }),
+  ).rejects.toThrow("Restore candidate search index contents do not match videos.");
+
+  expect(readFileSync(options.activeDatabasePath)).toEqual(options.activeBytesBefore);
+  expect(readFileSync(options.candidatePath)).toEqual(candidateBytesBefore);
+  expect(existsSync(join(options.fixtureDirectory, "backups"))).toBe(false);
+  expect(
+    readdirSync(options.fixtureDirectory).filter((name) => name.includes(".restore-")),
+  ).toEqual([]);
+
+  const active = openDatabase(options.activeDatabasePath);
+  try {
+    expect(getMigrationStatus(active, repositoryMigrationsDirectory)).toMatchObject({
+      currentVersion: 2,
+      latestVersion: 2,
+      pendingMigrations: [],
+    });
+  } finally {
+    active.close();
+  }
 }
 
 afterEach(() => {
@@ -705,6 +760,111 @@ describe("applyMigrations", () => {
       active.close();
     }
   });
+
+  it("rejects a restored portable search index whose content is stale", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const candidatePath = join(fixtureDirectory, "stale-portable-search.sqlite");
+    expect(
+      applyMigrations(fixture.database, repositoryMigrationsDirectory, { fts5: false }),
+    ).toEqual([1, 2]);
+    fixture.database.close();
+    database = undefined;
+    const activeBytesBefore = readFileSync(databasePath);
+
+    const candidate = openDatabase(candidatePath);
+    try {
+      expect(applyMigrations(candidate, repositoryMigrationsDirectory, { fts5: false })).toEqual([
+        1, 2,
+      ]);
+      expect(getSearchIndexMode(candidate)).toBe("portable");
+      const { videoId } = insertPublishedVideoWithApproval(candidate);
+      const video = candidate
+        .prepare("SELECT rowid, title, description FROM videos WHERE id = ?")
+        .get(videoId) as SearchVideoRow;
+      candidate
+        .prepare("UPDATE videos_fts SET title = ? WHERE rowid = ?")
+        .run("Stale portable title", video.rowid);
+      expect(
+        candidate.prepare("SELECT title FROM videos_fts WHERE rowid = ?").get(video.rowid),
+      ).toEqual({ title: "Stale portable title" });
+      expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+        currentVersion: 2,
+        latestVersion: 2,
+        pendingMigrations: [],
+      });
+    } finally {
+      candidate.close();
+    }
+
+    await expectStaleSearchRestoreRejection({
+      activeBytesBefore,
+      activeDatabasePath: databasePath,
+      candidatePath,
+      fixtureDirectory,
+    });
+  });
+
+  it.runIf(RUNTIME_HAS_FTS5)(
+    "rejects a restored FTS5 index whose external-content entries are stale",
+    async () => {
+      const fixture = createFixture();
+      const fixtureDirectory = temporaryDirectory;
+
+      if (!fixtureDirectory) {
+        throw new Error("Temporary migration directory was not created.");
+      }
+
+      const databasePath = join(fixtureDirectory, "database.sqlite");
+      const candidatePath = join(fixtureDirectory, "stale-fts5-search.sqlite");
+      expect(
+        applyMigrations(fixture.database, repositoryMigrationsDirectory, { fts5: true }),
+      ).toEqual([1, 2]);
+      fixture.database.close();
+      database = undefined;
+      const activeBytesBefore = readFileSync(databasePath);
+
+      const candidate = openDatabase(candidatePath);
+      try {
+        expect(applyMigrations(candidate, repositoryMigrationsDirectory, { fts5: true })).toEqual([
+          1, 2,
+        ]);
+        expect(getSearchIndexMode(candidate)).toBe("fts5");
+        const { videoId } = insertPublishedVideoWithApproval(candidate);
+        const video = candidate
+          .prepare("SELECT rowid, title, description FROM videos WHERE id = ?")
+          .get(videoId) as SearchVideoRow;
+        candidate
+          .prepare(
+            "INSERT INTO videos_fts(videos_fts, rowid, title, description) VALUES('delete', ?, ?, ?)",
+          )
+          .run(video.rowid, video.title, video.description);
+        expect(
+          candidate.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?").all("Restore"),
+        ).toEqual([]);
+        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+          currentVersion: 2,
+          latestVersion: 2,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      await expectStaleSearchRestoreRejection({
+        activeBytesBefore,
+        activeDatabasePath: databasePath,
+        candidatePath,
+        fixtureDirectory,
+      });
+    },
+  );
 
   it("restores committed rows from a live WAL source snapshot", async () => {
     const fixture = createFixture();
