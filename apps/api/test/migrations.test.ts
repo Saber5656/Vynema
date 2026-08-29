@@ -442,6 +442,27 @@ describe("applyMigrations", () => {
     ]);
   });
 
+  it("rejects active foreign-key violations before reporting a migrated database healthy", () => {
+    const fixture = createFixture();
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_foreign_keys.sql"),
+      [
+        "CREATE TABLE parents (id INTEGER PRIMARY KEY);",
+        "CREATE TABLE children (id INTEGER PRIMARY KEY, parent_id INTEGER NOT NULL REFERENCES parents(id));",
+        "-- recovery: restore backup",
+      ].join("\n"),
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+
+    fixture.database.exec("PRAGMA foreign_keys = OFF");
+    fixture.database.prepare("INSERT INTO children (id, parent_id) VALUES (1, 999)").run();
+    fixture.database.exec("PRAGMA foreign_keys = ON");
+
+    expect(() => getMigrationStatus(fixture.database, fixture.migrationsDirectory)).toThrow(
+      "SQLite foreign-key consistency check failed.",
+    );
+  });
+
   it("rejects non-pristine version-zero databases before backup or first migration", async () => {
     const fixture = createFixture();
     const fixtureDirectory = temporaryDirectory;

@@ -2,7 +2,12 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
-import { backupDatabase, openDatabase, type Database } from "./database.js";
+import {
+  assertDatabaseIntegrity,
+  backupDatabase,
+  openDatabase,
+  type Database,
+} from "./database.js";
 
 const MIGRATION_NAME = /^(\d{4,})_[a-z0-9][a-z0-9_-]*\.sql$/;
 const MAX_USER_VERSION = 2_147_483_647;
@@ -265,6 +270,7 @@ export function getMigrationStatus(
 
   if (currentVersion > 0) {
     assertCanonicalMigratedSchema(database, migrationsDirectory, currentVersion);
+    assertDatabaseIntegrity(database);
   }
 
   return {
