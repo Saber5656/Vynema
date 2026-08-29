@@ -813,6 +813,23 @@ describe("canonical schema", () => {
         "Approved for publication.",
         2_500,
       );
+
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
+        .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("published videos require an approval review");
+    database
+      .prepare("UPDATE users SET role = 'reviewer', status = 'banned' WHERE id = ?")
+      .run("usr_11111111-1111-4111-8111-111111111111");
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
+        .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("published videos require an approval review");
+    database
+      .prepare("UPDATE users SET status = 'active' WHERE id = ?")
+      .run("usr_11111111-1111-4111-8111-111111111111");
     database
       .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
       .run(3_000, "vid_11111111-1111-4111-8111-111111111111");

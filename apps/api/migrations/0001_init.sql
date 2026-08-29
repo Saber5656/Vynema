@@ -384,7 +384,9 @@ WHEN NEW.status = 'published' AND OLD.status <> 'published' BEGIN
     THEN RAISE(ABORT, 'published videos must transition from pending review') END;
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM moderation_reviews r
+    JOIN users u ON u.id = r.reviewer_user_id
     WHERE r.video_id = OLD.id AND r.decision = 'approved'
+      AND u.status = 'active' AND u.role IN ('reviewer','admin')
   ) THEN RAISE(ABORT, 'published videos require an approval review') END;
 END;
 

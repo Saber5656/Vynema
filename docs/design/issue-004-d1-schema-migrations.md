@@ -459,7 +459,9 @@ WHEN NEW.status = 'published' AND OLD.status <> 'published' BEGIN
     THEN RAISE(ABORT, 'published videos must transition from pending review') END;
   SELECT CASE WHEN NOT EXISTS (
     SELECT 1 FROM moderation_reviews r
+    JOIN users u ON u.id = r.reviewer_user_id
     WHERE r.video_id = OLD.id AND r.decision = 'approved'
+      AND u.status = 'active' AND u.role IN ('reviewer','admin')
   ) THEN RAISE(ABORT, 'published videos require an approval review') END;
 END;
 
@@ -578,7 +580,7 @@ runtime that cannot provide FTS5.
 | capability completion | `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
 | media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail |
 | BLOB length | `length(content) != size_bytes` fails |
-| video lifecycle | `ai_generated != 1`, direct publication, publication without an approved review, `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps fail |
+| video lifecycle | `ai_generated != 1`, direct publication, publication without an approval from a currently active reviewer/admin (including viewer or banned-user approvals), `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps fail |
 | purge FK behavior | deleting a referenced BLOB fails; eligible rejected purge clears references and deletes same-intent BLOB in one transaction; injected failure rolls all of it back |
 | uniqueness | duplicate `agent_nonces` (agent_id, nonce) fails; duplicate `videos.intent_id` fails; duplicate `likes` PK fails |
 | search sync | both forced portable mode and runtime-selected mode keep `videos_fts` synchronized across insert/update/delete; FTS5 uses `MATCH`, portable mode uses bounded case-insensitive search |
