@@ -146,6 +146,11 @@ installed table/index/trigger schema drifts from the repository migrations.
 Restore validation builds the expected schema for the candidate's version and
 search mode; SQLite-reported virtual-table shadow objects are excluded, while
 all repository-owned schema objects must match exactly.
+Repository multi-statement helpers are synchronous. If a callback returns a
+Promise-like object or callable function, or if inspecting its `then` property
+throws, the helper rolls back and closes that SQLite connection before
+microtasks can resume; callers must treat the connection as invalid and reopen
+it rather than continuing outside the intended transaction.
 Never edit, rename, delete, or roll back an applied migration. To recover from a
 failed local migration, either restore the printed pre-migration backup,
 correct an unapplied SQL file, or add the next numbered fix-forward migration.

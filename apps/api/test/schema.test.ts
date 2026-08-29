@@ -1298,9 +1298,140 @@ describe("repository primitives", () => {
     expect(
       database.prepare("SELECT key FROM rate_limits WHERE key = ?").get("test"),
     ).toBeUndefined();
+  });
 
-    expect(() => transaction(database, () => Promise.resolve("not supported"))).toThrow(
-      "synchronous callback",
-    );
+  it("invalidates the connection before an async transaction callback can resume", async () => {
+    const misuseDirectory = mkdtempSync(join(tmpdir(), "vynema-async-transaction-"));
+    const misusePath = join(misuseDirectory, "database.sqlite");
+    const misuseDatabase = openDatabase(misusePath);
+    let continuation: Promise<void> | undefined;
+    let continuationError: unknown;
+    let connectionInvalidated = false;
+
+    try {
+      misuseDatabase.exec("CREATE TABLE async_probe (value INTEGER NOT NULL)");
+
+      expect(() =>
+        transaction(misuseDatabase, () => {
+          continuation = Promise.resolve().then(() => {
+            try {
+              misuseDatabase.prepare("INSERT INTO async_probe (value) VALUES (1)").run();
+            } catch (error) {
+              continuationError = error;
+            }
+          });
+          return continuation;
+        }),
+      ).toThrow("synchronous callback");
+      connectionInvalidated = true;
+
+      if (!continuation) {
+        throw new Error("Async transaction continuation was not created.");
+      }
+
+      await continuation;
+      expect(continuationError).toBeInstanceOf(Error);
+      expect(() => misuseDatabase.prepare("SELECT 1")).toThrow();
+
+      const verifier = openDatabase(misusePath);
+      try {
+        expect(verifier.prepare("SELECT count(*) AS count FROM async_probe").get()).toEqual({
+          count: 0,
+        });
+      } finally {
+        verifier.close();
+      }
+    } finally {
+      if (!connectionInvalidated) {
+        misuseDatabase.close();
+      }
+      rmSync(misuseDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("rolls back and invalidates the connection when thenable detection throws", () => {
+    const misuseDirectory = mkdtempSync(join(tmpdir(), "vynema-throwing-thenable-"));
+    const misusePath = join(misuseDirectory, "database.sqlite");
+    const misuseDatabase = openDatabase(misusePath);
+    let connectionInvalidated = false;
+
+    try {
+      misuseDatabase.exec("CREATE TABLE thenable_probe (value INTEGER NOT NULL)");
+      const throwingThenable = Object.defineProperty({}, "then", {
+        get() {
+          misuseDatabase.prepare("INSERT INTO thenable_probe (value) VALUES (1)").run();
+          throw new Error("then getter failed");
+        },
+      });
+
+      expect(() => transaction(misuseDatabase, () => throwingThenable)).toThrow(
+        "then getter failed",
+      );
+      connectionInvalidated = true;
+      expect(() => misuseDatabase.prepare("SELECT 1")).toThrow();
+
+      const verifier = openDatabase(misusePath);
+      try {
+        expect(verifier.prepare("SELECT count(*) AS count FROM thenable_probe").get()).toEqual({
+          count: 0,
+        });
+      } finally {
+        verifier.close();
+      }
+    } finally {
+      if (!connectionInvalidated) {
+        misuseDatabase.close();
+      }
+      rmSync(misuseDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("invalidates callable function thenables before their then method can write", async () => {
+    const misuseDirectory = mkdtempSync(join(tmpdir(), "vynema-callable-thenable-"));
+    const misusePath = join(misuseDirectory, "database.sqlite");
+    const misuseDatabase = openDatabase(misusePath);
+    let connectionInvalidated = false;
+    let writeError: unknown;
+    let markThenObserved: (() => void) | undefined;
+    const thenObserved = new Promise<void>((resolve) => {
+      markThenObserved = resolve;
+    });
+
+    try {
+      misuseDatabase.exec("CREATE TABLE callable_probe (value INTEGER NOT NULL)");
+      const callableThenable = Object.assign(() => undefined, {
+        then(resolve: () => void): void {
+          try {
+            misuseDatabase.prepare("INSERT INTO callable_probe (value) VALUES (1)").run();
+          } catch (error) {
+            writeError = error;
+          }
+          resolve();
+          markThenObserved?.();
+        },
+      });
+
+      expect(() => transaction(misuseDatabase, () => callableThenable)).toThrow(
+        "synchronous callback",
+      );
+      connectionInvalidated = true;
+      await thenObserved;
+      expect(writeError).toBeInstanceOf(Error);
+      expect(() => misuseDatabase.prepare("SELECT 1")).toThrow();
+
+      const verifier = openDatabase(misusePath);
+      try {
+        expect(verifier.prepare("SELECT count(*) AS count FROM callable_probe").get()).toEqual({
+          count: 0,
+        });
+      } finally {
+        verifier.close();
+      }
+    } finally {
+      if (!connectionInvalidated) {
+        misuseDatabase.close();
+      }
+      rmSync(misuseDirectory, { recursive: true, force: true });
+    }
   });
 });
