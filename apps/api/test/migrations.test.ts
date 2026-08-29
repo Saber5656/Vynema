@@ -299,6 +299,119 @@ describe("applyMigrations", () => {
     }
   });
 
+  it("rejects non-pristine version-zero restore candidates without replacing the active database", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_probe.sql"),
+      "CREATE TABLE restore_probe (value TEXT NOT NULL); -- recovery: restore backup",
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+    fixture.database.prepare("INSERT INTO restore_probe (value) VALUES (?)").run("active-data");
+    fixture.database.close();
+    database = undefined;
+
+    const activeBytesBefore = readFileSync(databasePath);
+    const candidates = [
+      {
+        path: join(fixtureDirectory, "unrelated-v0.sqlite"),
+        configure(candidate: Database): void {
+          candidate.exec("CREATE TABLE unrelated (id INTEGER)");
+        },
+      },
+      {
+        path: join(fixtureDirectory, "foreign-application-v0.sqlite"),
+        configure(candidate: Database): void {
+          candidate.exec("PRAGMA application_id = 1448234573");
+        },
+      },
+      {
+        path: join(fixtureDirectory, "sqlite-like-name-v0.sqlite"),
+        configure(candidate: Database): void {
+          candidate.exec("CREATE TABLE sqliteXunrelated (id INTEGER)");
+        },
+      },
+    ];
+
+    for (const candidateFixture of candidates) {
+      const candidate = openDatabase(candidateFixture.path);
+      try {
+        candidateFixture.configure(candidate);
+      } finally {
+        candidate.close();
+      }
+
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: databasePath,
+          backupPath: candidateFixture.path,
+          migrationsDirectory: fixture.migrationsDirectory,
+        }),
+      ).rejects.toThrow("migration version 0 restore source must be a pristine SQLite database");
+      expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
+    }
+  });
+
+  it("accepts a pristine version-zero restore candidate", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const pristinePath = join(fixtureDirectory, "pristine-v0.sqlite");
+    writeFileSync(
+      join(fixture.migrationsDirectory, "0001_probe.sql"),
+      "CREATE TABLE restore_probe (value TEXT NOT NULL); -- recovery: restore backup",
+    );
+    expect(applyMigrations(fixture.database, fixture.migrationsDirectory)).toEqual([1]);
+    fixture.database.close();
+    database = undefined;
+
+    const pristine = openDatabase(pristinePath);
+    pristine.close();
+
+    const result = await restoreDatabaseFromBackup({
+      activeDatabasePath: databasePath,
+      backupPath: pristinePath,
+      migrationsDirectory: fixture.migrationsDirectory,
+    });
+
+    expect(result.migrationStatus).toMatchObject({
+      currentVersion: 0,
+      latestVersion: 1,
+    });
+    expect(result.safetyBackupPath).not.toBeNull();
+    expect(existsSync(result.safetyBackupPath ?? "")).toBe(true);
+    expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual([]);
+
+    const restored = openDatabase(databasePath);
+    try {
+      expect(restored.prepare("PRAGMA application_id").get()).toEqual({ application_id: 0 });
+      expect(
+        restored
+          .prepare("SELECT name FROM sqlite_schema WHERE name NOT GLOB 'sqlite_*' ORDER BY name")
+          .all(),
+      ).toEqual([]);
+    } finally {
+      restored.close();
+    }
+  });
+
   it("rejects a restore candidate with orphaned foreign-key rows", async () => {
     const fixture = createFixture();
     const fixtureDirectory = temporaryDirectory;

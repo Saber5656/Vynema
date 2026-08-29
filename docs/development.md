@@ -123,6 +123,13 @@ the replacement:
 pnpm --filter @vynema/api db:restore -- .local/backups/<backup-file>.bak
 ```
 
+A version-zero restore source is accepted only when it is a pristine
+pre-migration SQLite database: `PRAGMA application_id` must be `0` and
+`sqlite_schema` must contain no non-internal object. This prevents an
+unrelated SQLite database from being accepted merely because its
+`user_version` is still zero. The same check runs both before the safety
+backup and against the copied candidate.
+
 Reset the disposable local database only. The explicit `--yes` guard is
 required; an existing database is backed up before removal, and the fresh
 database is migrated with its own pre-migration backup:

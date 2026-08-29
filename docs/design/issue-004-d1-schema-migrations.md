@@ -587,7 +587,7 @@ runtime that cannot provide FTS5.
 | search sync | both forced portable mode and runtime-selected mode keep `videos_fts` synchronized across insert/update/delete; FTS5 uses `MATCH`, portable mode uses bounded case-insensitive search |
 | config load | `getConfig` returns typed values; deleting a key makes it throw `ConfigUnavailableError` |
 | quota integrity | non-integer/negative counters and non-integer ledger deltas fail; ledger records the identical `period_start`; daily rollover reconciles per period; double/insufficient release rolls back |
-| restore preflight | a valid SQLite file with incompatible migration metadata is rejected without changing the active database |
+| restore preflight | incompatible migration metadata, orphaned foreign keys, and non-pristine version-zero databases are rejected without changing the active database; a pristine version-zero source is accepted |
 
 ### 7. Acceptance mapping & PR evidence
 
