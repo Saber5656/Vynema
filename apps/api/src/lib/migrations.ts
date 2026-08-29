@@ -299,12 +299,12 @@ function migrationLedgerExists(database: Database): boolean {
 function createMigrationLedger(database: Database): void {
   database.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
-      version INTEGER PRIMARY KEY CHECK (version >= 1),
+      version INTEGER PRIMARY KEY CHECK (typeof(version) = 'integer' AND version >= 1),
       name TEXT NOT NULL UNIQUE CHECK (length(name) > 0),
       sha256 TEXT NOT NULL CHECK (
         length(sha256) = 64 AND sha256 NOT GLOB '*[^0-9a-f]*'
       ),
-      applied_at INTEGER NOT NULL CHECK (applied_at >= 0)
+      applied_at INTEGER NOT NULL CHECK (typeof(applied_at) = 'integer' AND applied_at >= 0)
     ) STRICT
   `);
 }

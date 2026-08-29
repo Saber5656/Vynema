@@ -913,6 +913,122 @@ describe("canonical schema", () => {
     ).toThrow();
   });
 
+  it("rejects non-integer security state, expiry, and timestamp values", () => {
+    insertAgentChannel();
+    insertUser();
+
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO sessions (id, token_hash, user_id, created_at, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(
+          "ses_44444444-4444-4444-8444-444444444444",
+          "a".repeat(64),
+          "usr_11111111-1111-4111-8111-111111111111",
+          1_000,
+          "never",
+          1_000,
+        ),
+    ).toThrow();
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO agent_nonces (agent_id, nonce, seen_at, expires_at) VALUES (?, ?, ?, ?)",
+        )
+        .run("agt_111111111111", "nonce-with-text-expiry", 1_000, "never"),
+    ).toThrow();
+
+    const insertTimedIntent = database.prepare(
+      [
+        "INSERT INTO upload_intents (",
+        "id, agent_id, channel_id, declared_video_bytes, declared_video_sha256,",
+        "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at",
+        ") VALUES (?, ?, ?, ?, ?, 'video/mp4', ?, ?, ?, ?, ?)",
+      ].join(" "),
+    );
+    expect(() =>
+      insertTimedIntent.run(
+        "int_aaaa1111-1111-4111-8111-111111111111",
+        "agt_111111111111",
+        "chn_11111111-1111-4111-8111-111111111111",
+        VIDEO_BYTES.length,
+        VIDEO_HASH,
+        60,
+        "Text intent expiry",
+        "{}",
+        1_000,
+        "never",
+      ),
+    ).toThrow();
+
+    insertIntent("int_aaaa2222-2222-4222-8222-222222222222");
+    expect(() =>
+      database
+        .prepare("UPDATE upload_intents SET finalized_at = ? WHERE id = ?")
+        .run("finished", "int_aaaa2222-2222-4222-8222-222222222222"),
+    ).toThrow();
+
+    const insertTimedCapability = database.prepare(
+      [
+        "INSERT INTO upload_capabilities (",
+        "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
+        "expected_mime, expires_at, created_at",
+        ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
+      ].join(" "),
+    );
+    expect(() =>
+      insertTimedCapability.run(
+        "cap_aaaa1111-1111-4111-8111-111111111111",
+        "int_aaaa2222-2222-4222-8222-222222222222",
+        "b".repeat(64),
+        VIDEO_BYTES.length,
+        VIDEO_HASH,
+        "never",
+        1_100,
+      ),
+    ).toThrow();
+
+    insertTimedCapability.run(
+      "cap_aaaa2222-2222-4222-8222-222222222222",
+      "int_aaaa2222-2222-4222-8222-222222222222",
+      "c".repeat(64),
+      VIDEO_BYTES.length,
+      VIDEO_HASH,
+      90_000,
+      1_100,
+    );
+    expect(() =>
+      database
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+        .run("claimed", "cap_aaaa2222-2222-4222-8222-222222222222"),
+    ).toThrow();
+    database
+      .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+      .run(1_200, "cap_aaaa2222-2222-4222-8222-222222222222");
+    insertBlob(
+      "int_aaaa2222-2222-4222-8222-222222222222",
+      "video",
+      "blob_aaaa2222-2222-4222-8222-222222222222",
+    );
+    expect(() =>
+      database
+        .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+        .run("used", "cap_aaaa2222-2222-4222-8222-222222222222"),
+    ).toThrow();
+
+    expect(() =>
+      database
+        .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+        .run("comment:usr_test", "window", 1),
+    ).toThrow();
+    expect(() =>
+      database
+        .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+        .run("comment:usr_test", 1_000, "many"),
+    ).toThrow();
+  });
+
   it("binds intent channels to their owning agents and freezes issued scope", () => {
     insertAgentChannel();
     insertAgentChannel(

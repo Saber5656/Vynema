@@ -2,13 +2,13 @@
 
 CREATE TABLE users (
   id TEXT NOT NULL PRIMARY KEY,
-  github_id INTEGER NOT NULL UNIQUE,
+  github_id INTEGER NOT NULL UNIQUE CHECK (typeof(github_id) = 'integer'),
   github_login TEXT NOT NULL,
   display_name TEXT NOT NULL,
   role TEXT NOT NULL DEFAULT 'viewer' CHECK (role IN ('viewer','reviewer','admin')),
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','banned')),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  updated_at INTEGER NOT NULL CHECK (typeof(updated_at) = 'integer')
 );
 
 CREATE TABLE sessions (
@@ -16,9 +16,9 @@ CREATE TABLE sessions (
   token_hash TEXT NOT NULL UNIQUE           -- hex sha256 of the cookie token; raw token never stored
     CHECK (typeof(token_hash) = 'text' AND length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'),
   user_id TEXT NOT NULL REFERENCES users(id),
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,
-  last_used_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  expires_at INTEGER NOT NULL CHECK (typeof(expires_at) = 'integer'),
+  last_used_at INTEGER NOT NULL CHECK (typeof(last_used_at) = 'integer')
 );
 CREATE INDEX idx_sessions_user ON sessions(user_id);
 CREATE INDEX idx_sessions_expires ON sessions(expires_at);
@@ -28,10 +28,10 @@ CREATE TABLE agents (
   display_name TEXT NOT NULL,
   owner_contact TEXT NOT NULL,              -- accountability reference (email / GitHub handle)
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled','revoked')),
-  revoked_at INTEGER,
+  revoked_at INTEGER CHECK (revoked_at IS NULL OR typeof(revoked_at) = 'integer'),
   revoked_reason TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  updated_at INTEGER NOT NULL CHECK (typeof(updated_at) = 'integer')
 );
 
 CREATE TABLE agent_keys (
@@ -39,16 +39,16 @@ CREATE TABLE agent_keys (
   agent_id TEXT NOT NULL REFERENCES agents(id),
   public_key_spki_b64 TEXT NOT NULL,        -- base64 of SPKI DER
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired','revoked')),
-  created_at INTEGER NOT NULL,
-  retired_at INTEGER
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  retired_at INTEGER CHECK (retired_at IS NULL OR typeof(retired_at) = 'integer')
 );
 CREATE INDEX idx_agent_keys_agent ON agent_keys(agent_id);
 
 CREATE TABLE agent_nonces (
   agent_id TEXT NOT NULL,
   nonce TEXT NOT NULL,
-  seen_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,              -- seen_at + 24h; purged by #10 cleanup job
+  seen_at INTEGER NOT NULL CHECK (typeof(seen_at) = 'integer'),
+  expires_at INTEGER NOT NULL CHECK (typeof(expires_at) = 'integer'), -- seen_at + 24h; purged by #10 cleanup job
   PRIMARY KEY (agent_id, nonce)
 );
 CREATE INDEX idx_agent_nonces_expires ON agent_nonces(expires_at);
@@ -61,8 +61,8 @@ CREATE TABLE channels (
   description TEXT NOT NULL DEFAULT '',
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','frozen')),
   frozen_reason TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  updated_at INTEGER NOT NULL CHECK (typeof(updated_at) = 'integer'),
   UNIQUE (id, agent_id)
 );
 CREATE INDEX idx_channels_agent ON channels(agent_id);
@@ -83,9 +83,9 @@ CREATE TABLE upload_intents (
   description TEXT NOT NULL DEFAULT '',
   provenance_json TEXT NOT NULL,            -- JSON: {model, promptSummary?, pipeline?, notes?}
   failure_reason TEXT,
-  created_at INTEGER NOT NULL,
-  expires_at INTEGER NOT NULL,              -- created_at + 15 min
-  finalized_at INTEGER,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  expires_at INTEGER NOT NULL CHECK (typeof(expires_at) = 'integer'), -- created_at + 15 min
+  finalized_at INTEGER CHECK (finalized_at IS NULL OR typeof(finalized_at) = 'integer'),
   CHECK (typeof(declared_video_bytes) = 'integer' AND declared_video_bytes >= 1024),
   CHECK (typeof(declared_video_sha256) = 'text' AND length(declared_video_sha256) = 64
     AND declared_video_sha256 NOT GLOB '*[^0-9a-f]*'),
@@ -118,10 +118,10 @@ CREATE TABLE upload_capabilities (
   expected_sha256 TEXT NOT NULL CHECK (typeof(expected_sha256) = 'text'
     AND length(expected_sha256) = 64 AND expected_sha256 NOT GLOB '*[^0-9a-f]*'),
   expected_mime TEXT NOT NULL,
-  expires_at INTEGER NOT NULL,
-  claimed_at INTEGER,
-  used_at INTEGER,
-  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL CHECK (typeof(expires_at) = 'integer'),
+  claimed_at INTEGER CHECK (claimed_at IS NULL OR typeof(claimed_at) = 'integer'),
+  used_at INTEGER CHECK (used_at IS NULL OR typeof(used_at) = 'integer'),
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   CHECK ((kind = 'video' AND expected_mime = 'video/mp4') OR
          (kind = 'thumbnail' AND expected_mime IN ('image/jpeg','image/png'))),
   CHECK (used_at IS NULL OR (claimed_at IS NOT NULL AND used_at >= claimed_at)),
@@ -201,7 +201,7 @@ CREATE TABLE media_blobs (
   sha256 TEXT NOT NULL CHECK (typeof(sha256) = 'text' AND length(sha256) = 64
     AND sha256 NOT GLOB '*[^0-9a-f]*'),
   mime TEXT NOT NULL,
-  created_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   UNIQUE(intent_id, kind),
   CHECK (length(content) = size_bytes)
 );
@@ -238,16 +238,17 @@ CREATE TABLE videos (
   size_bytes INTEGER NOT NULL CHECK (typeof(size_bytes) = 'integer'), -- verified against the stored object at finalize
   sha256 TEXT NOT NULL CHECK (typeof(sha256) = 'text' AND length(sha256) = 64
     AND sha256 NOT GLOB '*[^0-9a-f]*'),
-  ai_generated INTEGER NOT NULL DEFAULT 1 CHECK (ai_generated = 1), -- always 1 in MVP (FR-008)
+  ai_generated INTEGER NOT NULL DEFAULT 1
+    CHECK (typeof(ai_generated) = 'integer' AND ai_generated = 1), -- always 1 in MVP (FR-008)
   provenance_json TEXT NOT NULL,            -- copied from intent (FR-009)
   video_blob_id TEXT REFERENCES media_blobs(id),      -- immutable development media
   thumbnail_blob_id TEXT REFERENCES media_blobs(id),
-  published_at INTEGER,
-  rejected_at INTEGER,
-  taken_down_at INTEGER,
+  published_at INTEGER CHECK (published_at IS NULL OR typeof(published_at) = 'integer'),
+  rejected_at INTEGER CHECK (rejected_at IS NULL OR typeof(rejected_at) = 'integer'),
+  taken_down_at INTEGER CHECK (taken_down_at IS NULL OR typeof(taken_down_at) = 'integer'),
   takedown_reason TEXT,
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  updated_at INTEGER NOT NULL CHECK (typeof(updated_at) = 'integer'),
   CHECK (
     (status = 'pending_review' AND published_at IS NULL AND rejected_at IS NULL AND taken_down_at IS NULL)
     OR (status = 'published' AND video_blob_id IS NOT NULL AND published_at IS NOT NULL AND rejected_at IS NULL AND taken_down_at IS NULL)
@@ -324,8 +325,8 @@ CREATE TABLE comments (
   body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
   status TEXT NOT NULL DEFAULT 'visible'
     CHECK (status IN ('visible','hidden_by_moderator','deleted_by_user')),
-  created_at INTEGER NOT NULL,
-  updated_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  updated_at INTEGER NOT NULL CHECK (typeof(updated_at) = 'integer')
 );
 CREATE INDEX idx_comments_video_created ON comments(video_id, created_at DESC);
 CREATE INDEX idx_comments_user ON comments(user_id);
@@ -333,7 +334,7 @@ CREATE INDEX idx_comments_user ON comments(user_id);
 CREATE TABLE likes (
   user_id TEXT NOT NULL REFERENCES users(id),
   video_id TEXT NOT NULL REFERENCES videos(id),
-  created_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   PRIMARY KEY (user_id, video_id)
 );
 CREATE INDEX idx_likes_video ON likes(video_id);
@@ -341,7 +342,7 @@ CREATE INDEX idx_likes_video ON likes(video_id);
 CREATE TABLE saves (
   user_id TEXT NOT NULL REFERENCES users(id),
   video_id TEXT NOT NULL REFERENCES videos(id),
-  created_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   PRIMARY KEY (user_id, video_id)
 );
 CREATE INDEX idx_saves_user ON saves(user_id, created_at DESC);
@@ -349,7 +350,7 @@ CREATE INDEX idx_saves_user ON saves(user_id, created_at DESC);
 CREATE TABLE follows (
   user_id TEXT NOT NULL REFERENCES users(id),
   channel_id TEXT NOT NULL REFERENCES channels(id),
-  created_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
   PRIMARY KEY (user_id, channel_id)
 );
 CREATE INDEX idx_follows_channel ON follows(channel_id);
@@ -366,8 +367,8 @@ CREATE TABLE abuse_reports (
     CHECK (status IN ('open','under_review','resolved_actioned','resolved_no_action')),
   resolved_by_user_id TEXT REFERENCES users(id),
   resolution_note TEXT,
-  created_at INTEGER NOT NULL,
-  resolved_at INTEGER
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer'),
+  resolved_at INTEGER CHECK (resolved_at IS NULL OR typeof(resolved_at) = 'integer')
 );
 CREATE INDEX idx_reports_status ON abuse_reports(status, created_at);
 CREATE INDEX idx_reports_target ON abuse_reports(target_type, target_id);
@@ -378,7 +379,7 @@ CREATE TABLE moderation_reviews (
   reviewer_user_id TEXT NOT NULL REFERENCES users(id),
   decision TEXT NOT NULL CHECK (decision IN ('approved','rejected')),
   reason TEXT NOT NULL CHECK (length(reason) BETWEEN 1 AND 2000),
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL CHECK (typeof(created_at) = 'integer')
 );
 CREATE INDEX idx_reviews_video ON moderation_reviews(video_id);
 
@@ -434,13 +435,13 @@ CREATE TABLE quota_counters (
 CREATE TABLE platform_config (
   key TEXT NOT NULL PRIMARY KEY,
   value TEXT NOT NULL,                      -- store as string; parse by declared type in code
-  updated_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL CHECK (typeof(updated_at) = 'integer'),
   updated_by TEXT NOT NULL DEFAULT 'system'
 );
 
 CREATE TABLE audit_events (
   id TEXT NOT NULL PRIMARY KEY,
-  occurred_at INTEGER NOT NULL,
+  occurred_at INTEGER NOT NULL CHECK (typeof(occurred_at) = 'integer'),
   actor_type TEXT NOT NULL CHECK (actor_type IN ('human','agent','system')),
   actor_id TEXT NOT NULL DEFAULT '',
   action TEXT NOT NULL,                     -- dotted, e.g. 'intent.created' (registry in packages/shared)
@@ -456,8 +457,8 @@ CREATE INDEX idx_audit_action ON audit_events(action, occurred_at);
 
 CREATE TABLE rate_limits (
   key TEXT NOT NULL,                        -- '{scope}:{principal}', e.g. 'comment:usr_…'
-  window_start INTEGER NOT NULL,
-  count INTEGER NOT NULL,
+  window_start INTEGER NOT NULL CHECK (typeof(window_start) = 'integer'),
+  count INTEGER NOT NULL CHECK (typeof(count) = 'integer'),
   PRIMARY KEY (key, window_start)
 );
 
