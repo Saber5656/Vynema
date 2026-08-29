@@ -732,6 +732,187 @@ describe("canonical schema", () => {
     ).toThrow();
   });
 
+  it("rejects non-integer upload and media measurements", () => {
+    insertAgentChannel();
+
+    const insertMeasuredIntent = database.prepare(
+      [
+        "INSERT INTO upload_intents (",
+        "id, agent_id, channel_id, declared_video_bytes, declared_video_sha256,",
+        "declared_thumbnail_bytes, declared_thumbnail_sha256, declared_thumbnail_mime,",
+        "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join(" "),
+    );
+    const intentScope = ["agt_111111111111", "chn_11111111-1111-4111-8111-111111111111"] as const;
+
+    expect(() =>
+      insertMeasuredIntent.run(
+        "int_55555555-5555-4555-8555-555555555555",
+        ...intentScope,
+        "bytes",
+        VIDEO_HASH,
+        null,
+        null,
+        null,
+        "video/mp4",
+        60,
+        "Text video bytes",
+        "{}",
+        1_000,
+        100_000,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertMeasuredIntent.run(
+        "int_66666666-6666-4666-8666-666666666666",
+        ...intentScope,
+        VIDEO_BYTES.length,
+        VIDEO_HASH,
+        null,
+        null,
+        null,
+        "video/mp4",
+        "duration",
+        "Text duration",
+        "{}",
+        1_000,
+        100_000,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertMeasuredIntent.run(
+        "int_77777777-7777-4777-8777-777777777777",
+        ...intentScope,
+        VIDEO_BYTES.length,
+        VIDEO_HASH,
+        "thumbnail-bytes",
+        THUMBNAIL_HASH,
+        "image/png",
+        "video/mp4",
+        60,
+        "Text thumbnail bytes",
+        "{}",
+        1_000,
+        100_000,
+      ),
+    ).toThrow();
+
+    try {
+      database.exec("PRAGMA ignore_check_constraints = ON");
+      insertMeasuredIntent.run(
+        "int_88888888-8888-4888-8888-888888888888",
+        ...intentScope,
+        "capability-bytes",
+        VIDEO_HASH,
+        null,
+        null,
+        null,
+        "video/mp4",
+        60,
+        "Seed invalid parent measurement",
+        "{}",
+        1_000,
+        100_000,
+      );
+    } finally {
+      database.exec("PRAGMA ignore_check_constraints = OFF");
+    }
+
+    const insertMeasuredCapability = database.prepare(
+      [
+        "INSERT INTO upload_capabilities (",
+        "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
+        "expected_mime, expires_at, created_at",
+        ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
+      ].join(" "),
+    );
+    expect(() =>
+      insertMeasuredCapability.run(
+        "cap_44444444-4444-4444-8444-444444444444",
+        "int_88888888-8888-4888-8888-888888888888",
+        "d".repeat(64),
+        "capability-bytes",
+        VIDEO_HASH,
+        90_000,
+        1_100,
+      ),
+    ).toThrow();
+
+    try {
+      database.exec("PRAGMA ignore_check_constraints = ON");
+      insertMeasuredCapability.run(
+        "cap_55555555-5555-4555-8555-555555555555",
+        "int_88888888-8888-4888-8888-888888888888",
+        "e".repeat(64),
+        "capability-bytes",
+        VIDEO_HASH,
+        90_000,
+        1_100,
+      );
+      database
+        .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
+        .run(1_200, "cap_55555555-5555-4555-8555-555555555555");
+    } finally {
+      database.exec("PRAGMA ignore_check_constraints = OFF");
+    }
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO media_blobs (id, intent_id, kind, content, size_bytes, sha256, mime, created_at) VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?)",
+        )
+        .run(
+          "blob_44444444-4444-4444-8444-444444444444",
+          "int_88888888-8888-4888-8888-888888888888",
+          VIDEO_BYTES,
+          "capability-bytes",
+          VIDEO_HASH,
+          1_300,
+        ),
+    ).toThrow();
+
+    insertIntent("int_99999999-9999-4999-8999-999999999999");
+    const insertMeasuredVideo = database.prepare(
+      [
+        "INSERT INTO videos (",
+        "id, intent_id, agent_id, channel_id, title, duration_seconds, size_bytes,",
+        "sha256, provenance_json, created_at, updated_at",
+        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      ].join(" "),
+    );
+    const videoScope = [
+      "int_99999999-9999-4999-8999-999999999999",
+      "agt_111111111111",
+      "chn_11111111-1111-4111-8111-111111111111",
+    ] as const;
+    expect(() =>
+      insertMeasuredVideo.run(
+        "vid_22222222-2222-4222-8222-222222222222",
+        ...videoScope,
+        "Text video duration",
+        "duration",
+        VIDEO_BYTES.length,
+        VIDEO_HASH,
+        "{}",
+        2_000,
+        2_000,
+      ),
+    ).toThrow();
+    expect(() =>
+      insertMeasuredVideo.run(
+        "vid_33333333-3333-4333-8333-333333333333",
+        ...videoScope,
+        "Text video size",
+        60,
+        "video-bytes",
+        VIDEO_HASH,
+        "{}",
+        2_000,
+        2_000,
+      ),
+    ).toThrow();
+  });
+
   it("binds intent channels to their owning agents and freezes issued scope", () => {
     insertAgentChannel();
     insertAgentChannel(

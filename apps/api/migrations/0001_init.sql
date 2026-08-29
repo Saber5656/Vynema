@@ -78,7 +78,7 @@ CREATE TABLE upload_intents (
   declared_thumbnail_sha256 TEXT,
   declared_thumbnail_mime TEXT,
   declared_mime TEXT NOT NULL CHECK (declared_mime = 'video/mp4'),
-  declared_duration_seconds INTEGER NOT NULL,
+  declared_duration_seconds INTEGER NOT NULL CHECK (typeof(declared_duration_seconds) = 'integer'),
   title TEXT NOT NULL,
   description TEXT NOT NULL DEFAULT '',
   provenance_json TEXT NOT NULL,            -- JSON: {model, promptSummary?, pipeline?, notes?}
@@ -86,13 +86,14 @@ CREATE TABLE upload_intents (
   created_at INTEGER NOT NULL,
   expires_at INTEGER NOT NULL,              -- created_at + 15 min
   finalized_at INTEGER,
-  CHECK (declared_video_bytes >= 1024),
+  CHECK (typeof(declared_video_bytes) = 'integer' AND declared_video_bytes >= 1024),
   CHECK (typeof(declared_video_sha256) = 'text' AND length(declared_video_sha256) = 64
     AND declared_video_sha256 NOT GLOB '*[^0-9a-f]*'),
   CHECK (
     (declared_thumbnail_bytes IS NULL AND declared_thumbnail_sha256 IS NULL AND declared_thumbnail_mime IS NULL)
     OR
-    (declared_thumbnail_bytes IS NOT NULL AND declared_thumbnail_bytes > 0
+    (declared_thumbnail_bytes IS NOT NULL AND typeof(declared_thumbnail_bytes) = 'integer'
+      AND declared_thumbnail_bytes > 0
       AND declared_thumbnail_sha256 IS NOT NULL AND typeof(declared_thumbnail_sha256) = 'text'
       AND length(declared_thumbnail_sha256) = 64
       AND declared_thumbnail_sha256 NOT GLOB '*[^0-9a-f]*'
@@ -112,7 +113,8 @@ CREATE TABLE upload_capabilities (
   token_sha256 TEXT NOT NULL UNIQUE
     CHECK (typeof(token_sha256) = 'text' AND length(token_sha256) = 64
       AND token_sha256 NOT GLOB '*[^0-9a-f]*'),
-  expected_size_bytes INTEGER NOT NULL CHECK (expected_size_bytes > 0),
+  expected_size_bytes INTEGER NOT NULL CHECK (typeof(expected_size_bytes) = 'integer'
+    AND expected_size_bytes > 0),
   expected_sha256 TEXT NOT NULL CHECK (typeof(expected_sha256) = 'text'
     AND length(expected_sha256) = 64 AND expected_sha256 NOT GLOB '*[^0-9a-f]*'),
   expected_mime TEXT NOT NULL,
@@ -195,7 +197,7 @@ CREATE TABLE media_blobs (
   intent_id TEXT NOT NULL REFERENCES upload_intents(id),
   kind TEXT NOT NULL CHECK (kind IN ('video','thumbnail')),
   content BLOB NOT NULL,
-  size_bytes INTEGER NOT NULL CHECK (size_bytes > 0),
+  size_bytes INTEGER NOT NULL CHECK (typeof(size_bytes) = 'integer' AND size_bytes > 0),
   sha256 TEXT NOT NULL CHECK (typeof(sha256) = 'text' AND length(sha256) = 64
     AND sha256 NOT GLOB '*[^0-9a-f]*'),
   mime TEXT NOT NULL,
@@ -232,8 +234,8 @@ CREATE TABLE videos (
     CHECK (status IN ('pending_review','published','rejected','taken_down')),
   title TEXT NOT NULL CHECK (length(title) BETWEEN 1 AND 200),
   description TEXT NOT NULL DEFAULT '' CHECK (length(description) <= 5000),
-  duration_seconds INTEGER NOT NULL,        -- agent-declared, not verified in MVP
-  size_bytes INTEGER NOT NULL,              -- verified against the stored object at finalize
+  duration_seconds INTEGER NOT NULL CHECK (typeof(duration_seconds) = 'integer'), -- agent-declared, not verified in MVP
+  size_bytes INTEGER NOT NULL CHECK (typeof(size_bytes) = 'integer'), -- verified against the stored object at finalize
   sha256 TEXT NOT NULL CHECK (typeof(sha256) = 'text' AND length(sha256) = 64
     AND sha256 NOT GLOB '*[^0-9a-f]*'),
   ai_generated INTEGER NOT NULL DEFAULT 1 CHECK (ai_generated = 1), -- always 1 in MVP (FR-008)
