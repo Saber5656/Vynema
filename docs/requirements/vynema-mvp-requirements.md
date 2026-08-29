@@ -25,7 +25,7 @@ Related current baselines:
   baseline; not operative hosted-service terms, with counsel/launch approval
   still pending
 - [Moderation policy](../policy/moderation-policy.md) - current pre-alpha enum
-  and behavior contract; #4/#13 own runtime implementation and tests
+  and behavior contract; #4/#11/#12/#13 own runtime implementation and tests
 
 ## Product Definition
 
