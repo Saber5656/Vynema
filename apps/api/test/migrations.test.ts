@@ -555,6 +555,159 @@ describe("applyMigrations", () => {
     ).toBeUndefined();
   });
 
+  it("rejects legacy v2 invariant violations before installing v3 guards", () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    expect(
+      applyMigrations(
+        fixture.database,
+        repositoryMigrationsDirectory,
+        detectMigrationCapabilities(fixture.database),
+        2,
+      ),
+    ).toEqual([1, 2]);
+    const { intentId, videoId } = insertPublishedVideoWithApproval(fixture.database);
+    const ledgerBefore = fixture.database
+      .prepare("SELECT version, name, sha256, applied_at FROM schema_migrations ORDER BY version")
+      .all();
+
+    const expectPreflightFailure = (expectedCause: string): void => {
+      let migrationError: unknown;
+      try {
+        applyMigrations(fixture.database, repositoryMigrationsDirectory);
+      } catch (error) {
+        migrationError = error;
+      }
+
+      expect(migrationError).toBeInstanceOf(Error);
+      expect((migrationError as Error).message).toBe(
+        "Migration 0003_guard_reviewed_invariants.sql failed.",
+      );
+      expect((migrationError as Error & { cause?: { message?: string } }).cause?.message).toContain(
+        expectedCause,
+      );
+      expect(fixture.database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+      expect(
+        fixture.database
+          .prepare(
+            "SELECT version, name, sha256, applied_at FROM schema_migrations ORDER BY version",
+          )
+          .all(),
+      ).toEqual(ledgerBefore);
+      expect(
+        fixture.database
+          .prepare(
+            "SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name LIKE '%_v3' ORDER BY name",
+          )
+          .all(),
+      ).toEqual([]);
+      expect(
+        fixture.database
+          .prepare(
+            "SELECT name FROM sqlite_temp_schema WHERE name LIKE 'vynema_v3_legacy_preflight%' ORDER BY name",
+          )
+          .all(),
+      ).toEqual([]);
+    };
+
+    fixture.database
+      .prepare("UPDATE upload_intents SET status = 'created', finalized_at = NULL WHERE id = ?")
+      .run(intentId);
+    fixture.database.prepare("UPDATE videos SET published_at = ? WHERE id = ?").run(900, videoId);
+    expectPreflightFailure("legacy v2 publication rows violate v3 invariants");
+    expect(
+      fixture.database
+        .prepare(
+          "SELECT i.status AS intent_status, i.finalized_at, v.status AS video_status, v.published_at FROM upload_intents i JOIN videos v ON v.intent_id = i.id WHERE i.id = ?",
+        )
+        .get(intentId),
+    ).toEqual({
+      intent_status: "created",
+      finalized_at: null,
+      video_status: "published",
+      published_at: 900,
+    });
+
+    fixture.database
+      .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+      .run(2_100, intentId);
+    fixture.database.prepare("UPDATE videos SET published_at = ? WHERE id = ?").run(3_000, videoId);
+    fixture.database
+      .prepare("UPDATE upload_intents SET provenance_json = ? WHERE id = ?")
+      .run("not-json", intentId);
+    expectPreflightFailure("legacy v2 upload rows violate v3 invariants");
+    expect(
+      fixture.database
+        .prepare(
+          "SELECT i.provenance_json AS intent_provenance, v.provenance_json AS video_provenance FROM upload_intents i JOIN videos v ON v.intent_id = i.id WHERE i.id = ?",
+        )
+        .get(intentId),
+    ).toEqual({ intent_provenance: "not-json", video_provenance: "{}" });
+
+    fixture.database
+      .prepare("UPDATE upload_intents SET provenance_json = ? WHERE id = ?")
+      .run("{}", intentId);
+    fixture.database
+      .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+      .run("legacy:negative", -1, -1);
+    expectPreflightFailure("legacy v2 rate-limit rows violate v3 invariants");
+    expect(
+      fixture.database
+        .prepare("SELECT window_start, count FROM rate_limits WHERE key = ?")
+        .get("legacy:negative"),
+    ).toEqual({ window_start: -1, count: -1 });
+
+    fixture.database.prepare("DELETE FROM rate_limits WHERE key = ?").run("legacy:negative");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([3]);
+    expect(fixture.database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 3 });
+    expect(
+      fixture.database.prepare("SELECT version FROM schema_migrations ORDER BY version").all(),
+    ).toEqual([{ version: 1 }, { version: 2 }, { version: 3 }]);
+    expect(
+      fixture.database
+        .prepare(
+          "SELECT name FROM sqlite_temp_schema WHERE name LIKE 'vynema_v3_legacy_preflight%' ORDER BY name",
+        )
+        .all(),
+    ).toEqual([]);
+
+    const cleanupDatabase = openDatabase(join(fixtureDirectory, "v2-capability-purged.sqlite"));
+    try {
+      expect(
+        applyMigrations(
+          cleanupDatabase,
+          repositoryMigrationsDirectory,
+          detectMigrationCapabilities(cleanupDatabase),
+          2,
+        ),
+      ).toEqual([1, 2]);
+      const cleanupFixture = insertFinalizedVideo(cleanupDatabase);
+      cleanupDatabase
+        .prepare("DELETE FROM upload_capabilities WHERE id = ?")
+        .run(cleanupFixture.capabilityId);
+
+      expect(applyMigrations(cleanupDatabase, repositoryMigrationsDirectory)).toEqual([3]);
+      expect(cleanupDatabase.prepare("PRAGMA user_version").get()).toEqual({ user_version: 3 });
+      expect(
+        cleanupDatabase
+          .prepare(
+            "SELECT v.id AS video_id, b.id AS blob_id FROM videos v JOIN media_blobs b ON b.id = v.video_blob_id WHERE v.id = ?",
+          )
+          .get(cleanupFixture.videoId),
+      ).toEqual({ video_id: cleanupFixture.videoId, blob_id: cleanupFixture.blobId });
+      expect(
+        cleanupDatabase.prepare("SELECT COUNT(*) AS count FROM upload_capabilities").get(),
+      ).toEqual({ count: 0 });
+    } finally {
+      cleanupDatabase.close();
+    }
+  });
+
   it("rejects malformed FTS5 capability markers without partial schema changes", () => {
     const fixture = createFixture();
     writeFileSync(

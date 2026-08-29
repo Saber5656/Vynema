@@ -2,6 +2,196 @@
 -- finalization, publication, and rate-limit designs. Applied migrations remain
 -- immutable; existing tables and retained rows are not rewritten.
 
+-- Prospective triggers cannot repair invalid rows retained from v2. Audit the
+-- current-state evidence that v3 can enforce before installing any guard. The
+-- migration runner wraps this file, its ledger write, and user_version update
+-- in one transaction, so any violation rolls the whole migration back.
+CREATE TEMP TABLE vynema_v3_legacy_preflight (
+  violation TEXT NOT NULL
+) STRICT;
+
+CREATE TEMP TRIGGER vynema_v3_legacy_preflight_abort
+BEFORE INSERT ON vynema_v3_legacy_preflight BEGIN
+  SELECT CASE NEW.violation
+    WHEN 'upload' THEN RAISE(ABORT, 'legacy v2 upload rows violate v3 invariants')
+    WHEN 'publication' THEN RAISE(ABORT, 'legacy v2 publication rows violate v3 invariants')
+    WHEN 'rate-limit' THEN RAISE(ABORT, 'legacy v2 rate-limit rows violate v3 invariants')
+    ELSE RAISE(ABORT, 'legacy v2 rows violate v3 invariants')
+  END;
+END;
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'upload' WHERE EXISTS (
+  SELECT 1 FROM upload_intents i
+  WHERE json_valid(i.provenance_json) <> 1
+    OR (i.status <> 'finalized' AND i.finalized_at IS NOT NULL)
+) OR EXISTS (
+  SELECT 1 FROM videos v
+  WHERE json_valid(v.provenance_json) <> 1 OR NOT EXISTS (
+    SELECT 1 FROM upload_intents i
+    WHERE i.id = v.intent_id AND i.provenance_json = v.provenance_json
+  )
+);
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'upload' WHERE EXISTS (
+  SELECT 1 FROM upload_capabilities c
+  WHERE (c.claimed_at IS NOT NULL AND (
+    c.claimed_at < c.created_at OR c.claimed_at > c.expires_at OR NOT EXISTS (
+      SELECT 1 FROM upload_intents i WHERE i.id = c.intent_id
+        AND c.claimed_at >= i.created_at AND c.claimed_at <= i.expires_at
+    )
+  )) OR (c.used_at IS NOT NULL AND (
+    c.claimed_at IS NULL OR c.used_at < c.claimed_at OR c.used_at > c.expires_at
+    OR NOT EXISTS (
+      SELECT 1 FROM upload_intents i
+      WHERE i.id = c.intent_id AND c.used_at <= i.expires_at
+    )
+  )) OR (c.kind = 'video' AND NOT EXISTS (
+    SELECT 1 FROM upload_intents i WHERE i.id = c.intent_id
+      AND i.declared_video_bytes = c.expected_size_bytes
+      AND i.declared_video_sha256 = c.expected_sha256
+      AND i.declared_mime = c.expected_mime
+  )) OR (c.kind = 'thumbnail' AND NOT EXISTS (
+    SELECT 1 FROM upload_intents i WHERE i.id = c.intent_id
+      AND i.declared_thumbnail_bytes = c.expected_size_bytes
+      AND i.declared_thumbnail_sha256 = c.expected_sha256
+      AND i.declared_thumbnail_mime = c.expected_mime
+  ))
+);
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'upload' WHERE EXISTS (
+  SELECT 1 FROM media_blobs b
+  WHERE NOT EXISTS (
+    SELECT 1 FROM upload_capabilities c
+    JOIN upload_intents i ON i.id = c.intent_id
+    WHERE c.intent_id = b.intent_id AND c.kind = b.kind
+      AND c.claimed_at IS NOT NULL
+      AND b.created_at >= c.claimed_at AND b.created_at <= c.expires_at
+      AND b.created_at <= i.expires_at
+      AND c.expected_size_bytes = b.size_bytes
+      AND c.expected_sha256 = b.sha256 AND c.expected_mime = b.mime
+  ) AND NOT EXISTS (
+    SELECT 1 FROM videos v
+    JOIN upload_intents i ON i.id = v.intent_id
+    WHERE i.status = 'finalized' AND b.intent_id = i.id
+      AND NOT EXISTS (
+        SELECT 1 FROM upload_capabilities c
+        WHERE c.intent_id = b.intent_id AND c.kind = b.kind
+      )
+      AND b.created_at >= i.created_at AND b.created_at <= i.finalized_at
+      AND b.created_at <= v.created_at
+      AND v.provenance_json = i.provenance_json AND (
+        (b.kind = 'video' AND v.video_blob_id = b.id
+          AND b.size_bytes = i.declared_video_bytes
+          AND b.sha256 = i.declared_video_sha256 AND b.mime = i.declared_mime)
+        OR (b.kind = 'thumbnail' AND v.thumbnail_blob_id = b.id
+          AND b.size_bytes = i.declared_thumbnail_bytes
+          AND b.sha256 = i.declared_thumbnail_sha256
+          AND b.mime = i.declared_thumbnail_mime)
+      )
+  )
+);
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'upload' WHERE EXISTS (
+  SELECT 1 FROM upload_capabilities c
+  WHERE c.used_at IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM media_blobs b
+    WHERE b.intent_id = c.intent_id AND b.kind = c.kind
+      AND b.created_at >= c.claimed_at AND b.created_at <= c.used_at
+      AND b.size_bytes = c.expected_size_bytes
+      AND b.sha256 = c.expected_sha256 AND b.mime = c.expected_mime
+  ) AND NOT EXISTS (
+    SELECT 1 FROM upload_intents i
+    LEFT JOIN videos v ON v.intent_id = i.id
+    WHERE i.id = c.intent_id AND (
+      i.status IN ('failed', 'expired') OR (
+        i.status = 'finalized' AND v.status = 'rejected' AND (
+          (c.kind = 'video' AND v.video_blob_id IS NULL)
+          OR (c.kind = 'thumbnail' AND v.thumbnail_blob_id IS NULL)
+        )
+      )
+    )
+  )
+);
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'upload' WHERE EXISTS (
+  SELECT 1 FROM upload_intents i
+  WHERE i.status = 'finalized' AND (
+    i.finalized_at IS NULL OR i.finalized_at < i.created_at
+    OR i.finalized_at > i.expires_at OR NOT EXISTS (
+      SELECT 1 FROM videos v
+      WHERE v.intent_id = i.id AND v.created_at >= i.created_at
+        AND v.created_at <= i.finalized_at
+        AND v.duration_seconds = i.declared_duration_seconds
+        AND v.size_bytes = i.declared_video_bytes
+        AND v.sha256 = i.declared_video_sha256
+        AND v.provenance_json = i.provenance_json
+        AND ((v.status = 'rejected' AND v.video_blob_id IS NULL) OR EXISTS (
+          SELECT 1 FROM media_blobs b WHERE b.id = v.video_blob_id
+            AND b.intent_id = i.id AND b.kind = 'video'
+            AND b.created_at <= v.created_at
+            AND b.size_bytes = i.declared_video_bytes
+            AND b.sha256 = i.declared_video_sha256 AND b.mime = i.declared_mime
+        ))
+        AND (NOT EXISTS (
+          SELECT 1 FROM upload_capabilities c
+          WHERE c.intent_id = i.id AND c.kind = 'video'
+        ) OR EXISTS (
+          SELECT 1 FROM upload_capabilities c
+          WHERE c.intent_id = i.id AND c.kind = 'video'
+            AND c.used_at IS NOT NULL AND c.used_at <= v.created_at
+        ))
+        AND (i.declared_thumbnail_bytes IS NULL
+          OR (v.status = 'rejected' AND v.thumbnail_blob_id IS NULL)
+          OR EXISTS (
+            SELECT 1 FROM media_blobs b WHERE b.id = v.thumbnail_blob_id
+              AND b.intent_id = i.id AND b.kind = 'thumbnail'
+              AND b.created_at <= v.created_at
+              AND b.size_bytes = i.declared_thumbnail_bytes
+              AND b.sha256 = i.declared_thumbnail_sha256
+              AND b.mime = i.declared_thumbnail_mime
+          ))
+        AND (i.declared_thumbnail_bytes IS NULL OR NOT EXISTS (
+          SELECT 1 FROM upload_capabilities c
+          WHERE c.intent_id = i.id AND c.kind = 'thumbnail'
+        ) OR EXISTS (
+          SELECT 1 FROM upload_capabilities c
+          WHERE c.intent_id = i.id AND c.kind = 'thumbnail'
+            AND c.used_at IS NOT NULL AND c.used_at <= v.created_at
+        ))
+    )
+  )
+);
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'publication' WHERE EXISTS (
+  SELECT 1 FROM videos v
+  WHERE v.status IN ('published', 'taken_down') AND (
+    v.published_at < v.created_at
+    OR (v.status = 'taken_down' AND v.taken_down_at < v.published_at)
+    OR NOT EXISTS (
+      SELECT 1 FROM upload_intents i WHERE i.id = v.intent_id
+        AND i.status = 'finalized' AND i.finalized_at <= v.published_at
+    ) OR NOT EXISTS (
+      SELECT 1 FROM moderation_reviews r
+      WHERE r.video_id = v.id AND r.decision = 'approved'
+        AND r.created_at <= v.published_at
+    )
+  )
+);
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'rate-limit' WHERE EXISTS (
+  SELECT 1 FROM rate_limits WHERE window_start < 0 OR count < 0
+);
+
+DROP TRIGGER vynema_v3_legacy_preflight_abort;
+DROP TABLE vynema_v3_legacy_preflight;
+
 CREATE TRIGGER upload_capability_claim_window_v3
 BEFORE UPDATE OF claimed_at ON upload_capabilities
 WHEN NEW.claimed_at IS NOT NULL AND OLD.claimed_at IS NULL BEGIN
