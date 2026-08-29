@@ -1042,7 +1042,7 @@ describe("applyMigrations", () => {
     }
   });
 
-  it("accepts canonical finalized cleanup after rejected media or expired capability purge", async () => {
+  it("accepts canonical cleanup and rejects causal regressions after evidence purge", async () => {
     const fixture = createFixture();
     const fixtureDirectory = temporaryDirectory;
 
@@ -1054,15 +1054,38 @@ describe("applyMigrations", () => {
     database = undefined;
     const rejectedCandidatePath = join(fixtureDirectory, "rejected-media-purged.sqlite");
     const rejectedRestorePath = join(fixtureDirectory, "rejected-media-restored.sqlite");
+    const rejectedTimelineCandidatePath = join(
+      fixtureDirectory,
+      "rejected-video-before-intent.sqlite",
+    );
+    const rejectedTimelineRestorePath = join(
+      fixtureDirectory,
+      "rejected-video-before-intent-restored.sqlite",
+    );
     const capabilityCandidatePath = join(fixtureDirectory, "capability-purged.sqlite");
     const capabilityRestorePath = join(fixtureDirectory, "capability-restored.sqlite");
+    const capabilityTimelineCandidatePath = join(
+      fixtureDirectory,
+      "capability-purged-video-before-blob.sqlite",
+    );
+    const capabilityTimelineRestorePath = join(
+      fixtureDirectory,
+      "capability-purged-video-before-blob-restored.sqlite",
+    );
 
     const rejectedCandidate = openDatabase(rejectedCandidatePath);
+    let finalizedEvidenceTriggerSql = "";
+    let rejectedIntentId = "";
     let rejectedVideoId = "";
     try {
       expect(applyMigrations(rejectedCandidate, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
       const rejectedFixture = insertFinalizedVideo(rejectedCandidate);
+      rejectedIntentId = rejectedFixture.intentId;
       rejectedVideoId = rejectedFixture.videoId;
+      finalizedEvidenceTriggerSql = getCanonicalTriggerSql(
+        rejectedCandidate,
+        "videos_finalized_evidence_immutable_v3",
+      );
       rejectedCandidate
         .prepare(
           "UPDATE videos SET status = 'rejected', rejected_at = ?, updated_at = ? WHERE id = ?",
@@ -1099,12 +1122,14 @@ describe("applyMigrations", () => {
 
     const capabilityCandidate = openDatabase(capabilityCandidatePath);
     let retainedBlobId = "";
+    let capabilityVideoId = "";
     try {
       expect(applyMigrations(capabilityCandidate, repositoryMigrationsDirectory)).toEqual([
         1, 2, 3,
       ]);
       const capabilityFixture = insertFinalizedVideo(capabilityCandidate);
       retainedBlobId = capabilityFixture.blobId;
+      capabilityVideoId = capabilityFixture.videoId;
       capabilityCandidate
         .prepare("DELETE FROM upload_capabilities WHERE id = ?")
         .run(capabilityFixture.capabilityId);
@@ -1132,6 +1157,76 @@ describe("applyMigrations", () => {
       ).toEqual({ count: 0 });
     } finally {
       capabilityRestore.close();
+    }
+
+    const causalTimelineCases: {
+      activePath: string;
+      candidatePath: string;
+      expectedViolation: string;
+      sourcePath: string;
+      tamper: (candidate: Database) => void;
+    }[] = [
+      {
+        activePath: rejectedTimelineRestorePath,
+        candidatePath: rejectedTimelineCandidatePath,
+        expectedViolation: "has invalid finalized lifecycle evidence",
+        sourcePath: rejectedCandidatePath,
+        tamper: (candidate) => {
+          candidate
+            .prepare("DELETE FROM upload_capabilities WHERE intent_id = ?")
+            .run(rejectedIntentId);
+          candidate
+            .prepare("UPDATE videos SET created_at = ? WHERE id = ?")
+            .run(900, rejectedVideoId);
+        },
+      },
+      {
+        activePath: capabilityTimelineRestorePath,
+        candidatePath: capabilityTimelineCandidatePath,
+        expectedViolation: "does not match a claimed upload capability",
+        sourcePath: capabilityCandidatePath,
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE videos SET created_at = ? WHERE id = ?")
+            .run(1_200, capabilityVideoId);
+        },
+      },
+    ];
+
+    for (const causalTimelineCase of causalTimelineCases) {
+      copyFileSync(causalTimelineCase.sourcePath, causalTimelineCase.candidatePath);
+      const candidate = openDatabase(causalTimelineCase.candidatePath);
+      try {
+        candidate.exec("DROP TRIGGER videos_finalized_evidence_immutable_v3");
+        causalTimelineCase.tamper(candidate);
+        candidate.exec(finalizedEvidenceTriggerSql);
+        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+          currentVersion: 3,
+          latestVersion: 3,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      const candidateBytesBefore = readFileSync(causalTimelineCase.candidatePath);
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: causalTimelineCase.activePath,
+          backupPath: causalTimelineCase.candidatePath,
+          migrationsDirectory: repositoryMigrationsDirectory,
+        }),
+      ).rejects.toThrow(causalTimelineCase.expectedViolation);
+
+      expect(existsSync(causalTimelineCase.activePath)).toBe(false);
+      expect(readFileSync(causalTimelineCase.candidatePath)).toEqual(candidateBytesBefore);
+      expect(existsSync(join(fixtureDirectory, "backups"))).toBe(false);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
     }
   });
 
