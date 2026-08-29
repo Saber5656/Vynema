@@ -13,12 +13,44 @@ CREATE TEMP TABLE vynema_v3_legacy_preflight (
 CREATE TEMP TRIGGER vynema_v3_legacy_preflight_abort
 BEFORE INSERT ON vynema_v3_legacy_preflight BEGIN
   SELECT CASE NEW.violation
+    WHEN 'identity' THEN RAISE(ABORT, 'legacy v2 identity keys must use text storage')
     WHEN 'upload' THEN RAISE(ABORT, 'legacy v2 upload rows violate v3 invariants')
     WHEN 'publication' THEN RAISE(ABORT, 'legacy v2 publication rows violate v3 invariants')
     WHEN 'rate-limit' THEN RAISE(ABORT, 'legacy v2 rate-limit rows violate v3 invariants')
     ELSE RAISE(ABORT, 'legacy v2 rows violate v3 invariants')
   END;
 END;
+
+INSERT INTO vynema_v3_legacy_preflight (violation)
+SELECT 'identity' WHERE EXISTS (
+  SELECT 1 FROM users WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM sessions WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM agents WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM agent_keys WHERE typeof(key_id) <> 'text'
+  UNION ALL SELECT 1 FROM agent_nonces
+    WHERE typeof(agent_id) <> 'text' OR typeof(nonce) <> 'text'
+  UNION ALL SELECT 1 FROM channels WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM upload_intents WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM upload_capabilities WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM media_blobs WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM videos WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM comments WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM likes
+    WHERE typeof(user_id) <> 'text' OR typeof(video_id) <> 'text'
+  UNION ALL SELECT 1 FROM saves
+    WHERE typeof(user_id) <> 'text' OR typeof(video_id) <> 'text'
+  UNION ALL SELECT 1 FROM follows
+    WHERE typeof(user_id) <> 'text' OR typeof(channel_id) <> 'text'
+  UNION ALL SELECT 1 FROM abuse_reports WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM moderation_reviews WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM quota_ledger WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM quota_counters
+    WHERE typeof(scope) <> 'text' OR typeof(scope_id) <> 'text'
+      OR typeof(metric) <> 'text'
+  UNION ALL SELECT 1 FROM platform_config WHERE typeof(key) <> 'text'
+  UNION ALL SELECT 1 FROM audit_events WHERE typeof(id) <> 'text'
+  UNION ALL SELECT 1 FROM rate_limits WHERE typeof(key) <> 'text'
+);
 
 INSERT INTO vynema_v3_legacy_preflight (violation)
 SELECT 'upload' WHERE EXISTS (
@@ -191,6 +223,207 @@ SELECT 'rate-limit' WHERE EXISTS (
 
 DROP TRIGGER vynema_v3_legacy_preflight_abort;
 DROP TABLE vynema_v3_legacy_preflight;
+
+CREATE TRIGGER users_identity_storage_insert_v3
+BEFORE INSERT ON users WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'users identity key must use text storage');
+END;
+CREATE TRIGGER users_identity_storage_update_v3
+BEFORE UPDATE OF id ON users WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'users identity key must use text storage');
+END;
+
+CREATE TRIGGER sessions_identity_storage_insert_v3
+BEFORE INSERT ON sessions WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'sessions identity key must use text storage');
+END;
+CREATE TRIGGER sessions_identity_storage_update_v3
+BEFORE UPDATE OF id ON sessions WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'sessions identity key must use text storage');
+END;
+
+CREATE TRIGGER agents_identity_storage_insert_v3
+BEFORE INSERT ON agents WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'agents identity key must use text storage');
+END;
+CREATE TRIGGER agents_identity_storage_update_v3
+BEFORE UPDATE OF id ON agents WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'agents identity key must use text storage');
+END;
+
+CREATE TRIGGER agent_keys_identity_storage_insert_v3
+BEFORE INSERT ON agent_keys WHEN typeof(NEW.key_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'agent_keys identity key must use text storage');
+END;
+CREATE TRIGGER agent_keys_identity_storage_update_v3
+BEFORE UPDATE OF key_id ON agent_keys WHEN typeof(NEW.key_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'agent_keys identity key must use text storage');
+END;
+
+CREATE TRIGGER agent_nonces_identity_storage_insert_v3
+BEFORE INSERT ON agent_nonces
+WHEN typeof(NEW.agent_id) <> 'text' OR typeof(NEW.nonce) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'agent_nonces identity key must use text storage');
+END;
+CREATE TRIGGER agent_nonces_identity_storage_update_v3
+BEFORE UPDATE OF agent_id, nonce ON agent_nonces
+WHEN typeof(NEW.agent_id) <> 'text' OR typeof(NEW.nonce) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'agent_nonces identity key must use text storage');
+END;
+
+CREATE TRIGGER channels_identity_storage_insert_v3
+BEFORE INSERT ON channels WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'channels identity key must use text storage');
+END;
+CREATE TRIGGER channels_identity_storage_update_v3
+BEFORE UPDATE OF id ON channels WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'channels identity key must use text storage');
+END;
+
+CREATE TRIGGER upload_intents_identity_storage_insert_v3
+BEFORE INSERT ON upload_intents WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'upload_intents identity key must use text storage');
+END;
+CREATE TRIGGER upload_intents_identity_storage_update_v3
+BEFORE UPDATE OF id ON upload_intents WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'upload_intents identity key must use text storage');
+END;
+
+CREATE TRIGGER upload_capabilities_identity_storage_insert_v3
+BEFORE INSERT ON upload_capabilities WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'upload_capabilities identity key must use text storage');
+END;
+CREATE TRIGGER upload_capabilities_identity_storage_update_v3
+BEFORE UPDATE OF id ON upload_capabilities WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'upload_capabilities identity key must use text storage');
+END;
+
+CREATE TRIGGER media_blobs_identity_storage_insert_v3
+BEFORE INSERT ON media_blobs WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'media_blobs identity key must use text storage');
+END;
+CREATE TRIGGER media_blobs_identity_storage_update_v3
+BEFORE UPDATE OF id ON media_blobs WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'media_blobs identity key must use text storage');
+END;
+
+CREATE TRIGGER videos_identity_storage_insert_v3
+BEFORE INSERT ON videos WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'videos identity key must use text storage');
+END;
+CREATE TRIGGER videos_identity_storage_update_v3
+BEFORE UPDATE OF id ON videos WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'videos identity key must use text storage');
+END;
+
+CREATE TRIGGER comments_identity_storage_insert_v3
+BEFORE INSERT ON comments WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'comments identity key must use text storage');
+END;
+CREATE TRIGGER comments_identity_storage_update_v3
+BEFORE UPDATE OF id ON comments WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'comments identity key must use text storage');
+END;
+
+CREATE TRIGGER likes_identity_storage_insert_v3
+BEFORE INSERT ON likes
+WHEN typeof(NEW.user_id) <> 'text' OR typeof(NEW.video_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'likes identity key must use text storage');
+END;
+CREATE TRIGGER likes_identity_storage_update_v3
+BEFORE UPDATE OF user_id, video_id ON likes
+WHEN typeof(NEW.user_id) <> 'text' OR typeof(NEW.video_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'likes identity key must use text storage');
+END;
+
+CREATE TRIGGER saves_identity_storage_insert_v3
+BEFORE INSERT ON saves
+WHEN typeof(NEW.user_id) <> 'text' OR typeof(NEW.video_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'saves identity key must use text storage');
+END;
+CREATE TRIGGER saves_identity_storage_update_v3
+BEFORE UPDATE OF user_id, video_id ON saves
+WHEN typeof(NEW.user_id) <> 'text' OR typeof(NEW.video_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'saves identity key must use text storage');
+END;
+
+CREATE TRIGGER follows_identity_storage_insert_v3
+BEFORE INSERT ON follows
+WHEN typeof(NEW.user_id) <> 'text' OR typeof(NEW.channel_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'follows identity key must use text storage');
+END;
+CREATE TRIGGER follows_identity_storage_update_v3
+BEFORE UPDATE OF user_id, channel_id ON follows
+WHEN typeof(NEW.user_id) <> 'text' OR typeof(NEW.channel_id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'follows identity key must use text storage');
+END;
+
+CREATE TRIGGER abuse_reports_identity_storage_insert_v3
+BEFORE INSERT ON abuse_reports WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'abuse_reports identity key must use text storage');
+END;
+CREATE TRIGGER abuse_reports_identity_storage_update_v3
+BEFORE UPDATE OF id ON abuse_reports WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'abuse_reports identity key must use text storage');
+END;
+
+CREATE TRIGGER moderation_reviews_identity_storage_insert_v3
+BEFORE INSERT ON moderation_reviews WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'moderation_reviews identity key must use text storage');
+END;
+CREATE TRIGGER moderation_reviews_identity_storage_update_v3
+BEFORE UPDATE OF id ON moderation_reviews WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'moderation_reviews identity key must use text storage');
+END;
+
+CREATE TRIGGER quota_ledger_identity_storage_insert_v3
+BEFORE INSERT ON quota_ledger WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'quota_ledger identity key must use text storage');
+END;
+CREATE TRIGGER quota_ledger_identity_storage_update_v3
+BEFORE UPDATE OF id ON quota_ledger WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'quota_ledger identity key must use text storage');
+END;
+
+CREATE TRIGGER quota_counters_identity_storage_insert_v3
+BEFORE INSERT ON quota_counters
+WHEN typeof(NEW.scope) <> 'text' OR typeof(NEW.scope_id) <> 'text'
+  OR typeof(NEW.metric) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'quota_counters identity key must use text storage');
+END;
+CREATE TRIGGER quota_counters_identity_storage_update_v3
+BEFORE UPDATE OF scope, scope_id, metric ON quota_counters
+WHEN typeof(NEW.scope) <> 'text' OR typeof(NEW.scope_id) <> 'text'
+  OR typeof(NEW.metric) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'quota_counters identity key must use text storage');
+END;
+
+CREATE TRIGGER platform_config_identity_storage_insert_v3
+BEFORE INSERT ON platform_config WHEN typeof(NEW.key) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'platform_config identity key must use text storage');
+END;
+CREATE TRIGGER platform_config_identity_storage_update_v3
+BEFORE UPDATE OF key ON platform_config WHEN typeof(NEW.key) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'platform_config identity key must use text storage');
+END;
+
+CREATE TRIGGER audit_events_identity_storage_insert_v3
+BEFORE INSERT ON audit_events WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'audit_events identity key must use text storage');
+END;
+CREATE TRIGGER audit_events_identity_storage_update_v3
+BEFORE UPDATE OF id ON audit_events WHEN typeof(NEW.id) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'audit_events identity key must use text storage');
+END;
+
+CREATE TRIGGER rate_limits_identity_storage_insert_v3
+BEFORE INSERT ON rate_limits WHEN typeof(NEW.key) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'rate_limits identity key must use text storage');
+END;
+CREATE TRIGGER rate_limits_identity_storage_update_v3
+BEFORE UPDATE OF key ON rate_limits WHEN typeof(NEW.key) <> 'text' BEGIN
+  SELECT RAISE(ABORT, 'rate_limits identity key must use text storage');
+END;
 
 CREATE TRIGGER upload_capability_claim_window_v3
 BEFORE UPDATE OF claimed_at ON upload_capabilities

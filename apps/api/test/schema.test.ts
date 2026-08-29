@@ -1047,6 +1047,58 @@ describe("canonical schema", () => {
     ).toThrow();
   });
 
+  it("requires text storage for identity primary keys on insert and update", () => {
+    const blobIdentity = Buffer.from("identity-as-blob");
+
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO users (id, github_id, github_login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(blobIdentity, 2_001, "blob-user", "Blob User", 1_000, 1_000),
+    ).toThrow("users identity key must use text storage");
+
+    insertUser();
+    expect(() =>
+      database
+        .prepare("UPDATE users SET id = ? WHERE id = ?")
+        .run(blobIdentity, "usr_11111111-1111-4111-8111-111111111111"),
+    ).toThrow("users identity key must use text storage");
+
+    insertAgentChannel();
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO agent_nonces (agent_id, nonce, seen_at, expires_at) VALUES (?, ?, ?, ?)",
+        )
+        .run("agt_111111111111", blobIdentity, 1_000, 2_000),
+    ).toThrow("agent_nonces identity key must use text storage");
+    database
+      .prepare(
+        "INSERT INTO agent_nonces (agent_id, nonce, seen_at, expires_at) VALUES (?, ?, ?, ?)",
+      )
+      .run("agt_111111111111", "text-nonce", 1_000, 2_000);
+    expect(() =>
+      database
+        .prepare("UPDATE agent_nonces SET nonce = ? WHERE agent_id = ? AND nonce = ?")
+        .run(blobIdentity, "agt_111111111111", "text-nonce"),
+    ).toThrow("agent_nonces identity key must use text storage");
+
+    expect(() =>
+      database
+        .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+        .run(blobIdentity, 1_000, 1),
+    ).toThrow("rate_limits identity key must use text storage");
+    database
+      .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+      .run("comment:text-key", 1_000, 1);
+    expect(() =>
+      database
+        .prepare("UPDATE rate_limits SET key = ? WHERE key = ? AND window_start = ?")
+        .run(blobIdentity, "comment:text-key", 1_000),
+    ).toThrow("rate_limits identity key must use text storage");
+  });
+
   it("binds intent channels to their owning agents and freezes issued scope", () => {
     insertAgentChannel();
     insertAgentChannel(

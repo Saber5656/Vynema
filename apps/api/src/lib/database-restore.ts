@@ -31,6 +31,16 @@ type SchemaTableRow = {
   name: string;
 };
 
+type SchemaColumnRow = {
+  name: string;
+  pk: number;
+  type: string;
+};
+
+type RestoredIdentityStorageMismatchRow = {
+  violation: number;
+};
+
 type VideoWithInvalidPublicationEvidenceRow = {
   id: string;
 };
@@ -62,6 +72,42 @@ export function removeDatabaseSidecars(path: string): void {
   rmSync(`${path}-shm`, { force: true });
   rmSync(`${path}-wal`, { force: true });
   rmSync(`${path}-journal`, { force: true });
+}
+
+function quoteSqliteIdentifier(identifier: string): string {
+  return `"${identifier.replaceAll('"', '""')}"`;
+}
+
+function assertRestoredIdentityStorageConsistency(database: Database): void {
+  const applicationTables = database
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT GLOB 'sqlite_*' ORDER BY name",
+    )
+    .all() as SchemaTableRow[];
+
+  for (const table of applicationTables) {
+    const quotedTable = quoteSqliteIdentifier(table.name);
+    const textPrimaryKeyColumns = (
+      database.prepare(`PRAGMA table_info(${quotedTable})`).all() as SchemaColumnRow[]
+    ).filter((column) => column.pk > 0 && column.type.trim().toUpperCase() === "TEXT");
+
+    if (textPrimaryKeyColumns.length === 0) {
+      continue;
+    }
+
+    const nonTextPredicate = textPrimaryKeyColumns
+      .map((column) => `typeof(${quoteSqliteIdentifier(column.name)}) <> 'text'`)
+      .join(" OR ");
+    const mismatch = database
+      .prepare(`SELECT 1 AS violation FROM ${quotedTable} WHERE ${nonTextPredicate} LIMIT 1`)
+      .get() as RestoredIdentityStorageMismatchRow | undefined;
+
+    if (mismatch) {
+      throw new Error(
+        `Restore candidate table ${table.name} has a primary key value that does not use TEXT storage.`,
+      );
+    }
+  }
 }
 
 function assertRestoredPublicationEvidence(database: Database): void {
@@ -480,6 +526,7 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
     assertDatabaseIntegrity(database);
     const migrationStatus = getMigrationStatus(database, migrationsDirectory);
     assertCanonicalMigratedSchema(database, migrationsDirectory, migrationStatus.currentVersion);
+    assertRestoredIdentityStorageConsistency(database);
     assertRestoredUploadProvenanceConsistency(database);
     assertRestoredMediaBindingConsistency(database);
     assertRestoredRateLimitConsistency(database);

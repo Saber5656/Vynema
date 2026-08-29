@@ -615,6 +615,25 @@ describe("applyMigrations", () => {
       ).toEqual([]);
     };
 
+    const legacyBlobUserId = Buffer.from("legacy-blob-user-id");
+    fixture.database
+      .prepare(
+        "INSERT INTO users (id, github_id, github_login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+      )
+      .run(legacyBlobUserId, 9_002, "legacy-blob-user", "Legacy Blob User", 1_000, 1_000);
+    expect(
+      fixture.database
+        .prepare("SELECT typeof(id) AS storage FROM users WHERE github_id = ?")
+        .get(9_002),
+    ).toEqual({ storage: "blob" });
+    expectPreflightFailure("legacy v2 identity keys must use text storage");
+    expect(
+      fixture.database
+        .prepare("SELECT typeof(id) AS storage FROM users WHERE github_id = ?")
+        .get(9_002),
+    ).toEqual({ storage: "blob" });
+    fixture.database.prepare("DELETE FROM users WHERE github_id = ?").run(9_002);
+
     fixture.database
       .prepare("UPDATE upload_intents SET status = 'created', finalized_at = NULL WHERE id = ?")
       .run(intentId);
@@ -675,6 +694,43 @@ describe("applyMigrations", () => {
         )
         .all(),
     ).toEqual([]);
+    const identityTables = [
+      "abuse_reports",
+      "agent_keys",
+      "agent_nonces",
+      "agents",
+      "audit_events",
+      "channels",
+      "comments",
+      "follows",
+      "likes",
+      "media_blobs",
+      "moderation_reviews",
+      "platform_config",
+      "quota_counters",
+      "quota_ledger",
+      "rate_limits",
+      "saves",
+      "sessions",
+      "upload_capabilities",
+      "upload_intents",
+      "users",
+      "videos",
+    ];
+    expect(
+      fixture.database
+        .prepare(
+          "SELECT name FROM sqlite_schema WHERE type = 'trigger' AND name LIKE '%_identity_storage_%_v3' ORDER BY name",
+        )
+        .all(),
+    ).toEqual(
+      identityTables
+        .flatMap((table) => [
+          { name: `${table}_identity_storage_insert_v3` },
+          { name: `${table}_identity_storage_update_v3` },
+        ])
+        .sort((left, right) => left.name.localeCompare(right.name)),
+    );
 
     const cleanupDatabase = openDatabase(join(fixtureDirectory, "v2-capability-purged.sqlite"));
     try {
@@ -1012,6 +1068,126 @@ describe("applyMigrations", () => {
       expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
         [],
       );
+    }
+  });
+
+  it("rejects restored non-text identity keys while preserving active and candidate bytes", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const canonicalSourcePath = join(fixtureDirectory, "canonical-identity-storage.sqlite");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+    fixture.database.close();
+    database = undefined;
+    const activeBytesBefore = readFileSync(databasePath);
+
+    const canonicalSource = openDatabase(canonicalSourcePath);
+    try {
+      expect(applyMigrations(canonicalSource, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+    } finally {
+      canonicalSource.close();
+    }
+
+    const tamperingCases: {
+      assertBlobStorage: (candidate: Database) => void;
+      candidateName: string;
+      tableName: string;
+      tamper: (candidate: Database) => void;
+      triggerName: string;
+    }[] = [
+      {
+        candidateName: "blob-user-identity.sqlite",
+        tableName: "users",
+        triggerName: "users_identity_storage_insert_v3",
+        tamper: (candidate) => {
+          candidate
+            .prepare(
+              "INSERT INTO users (id, github_id, github_login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            )
+            .run(
+              Buffer.from("restore-user-identity"),
+              9_101,
+              "restore-blob-user",
+              "Restore Blob User",
+              9_000,
+              9_000,
+            );
+        },
+        assertBlobStorage: (candidate) => {
+          expect(
+            candidate
+              .prepare("SELECT typeof(id) AS storage FROM users WHERE github_id = ?")
+              .get(9_101),
+          ).toEqual({ storage: "blob" });
+        },
+      },
+      {
+        candidateName: "blob-composite-identity.sqlite",
+        tableName: "agent_nonces",
+        triggerName: "agent_nonces_identity_storage_insert_v3",
+        tamper: (candidate) => {
+          candidate
+            .prepare(
+              "INSERT INTO agent_nonces (agent_id, nonce, seen_at, expires_at) VALUES (?, ?, ?, ?)",
+            )
+            .run("agt_restore_identity", Buffer.from("restore-nonce-identity"), 9_100, 9_200);
+        },
+        assertBlobStorage: (candidate) => {
+          expect(
+            candidate
+              .prepare(
+                "SELECT typeof(agent_id) AS agent_storage, typeof(nonce) AS nonce_storage FROM agent_nonces WHERE seen_at = ?",
+              )
+              .get(9_100),
+          ).toEqual({ agent_storage: "text", nonce_storage: "blob" });
+        },
+      },
+    ];
+
+    for (const tamperingCase of tamperingCases) {
+      const candidatePath = join(fixtureDirectory, tamperingCase.candidateName);
+      copyFileSync(canonicalSourcePath, candidatePath);
+      const candidate = openDatabase(candidatePath);
+      try {
+        const triggerSql = getCanonicalTriggerSql(candidate, tamperingCase.triggerName);
+        candidate.exec(`DROP TRIGGER ${tamperingCase.triggerName}`);
+        tamperingCase.tamper(candidate);
+        candidate.exec(triggerSql);
+        tamperingCase.assertBlobStorage(candidate);
+        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+          currentVersion: 3,
+          latestVersion: 3,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      const candidateBytesBefore = readFileSync(candidatePath);
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: databasePath,
+          backupPath: candidatePath,
+          migrationsDirectory: repositoryMigrationsDirectory,
+        }),
+      ).rejects.toThrow(
+        `Restore candidate table ${tamperingCase.tableName} has a primary key value that does not use TEXT storage.`,
+      );
+
+      expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+      expect(readFileSync(candidatePath)).toEqual(candidateBytesBefore);
+      expect(existsSync(join(fixtureDirectory, "backups"))).toBe(false);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
     }
   });
 
