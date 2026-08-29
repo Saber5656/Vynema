@@ -34,7 +34,10 @@ upload/finalize/status CLI is the split child #56 (#35U).
 
 ## Acceptance Criteria
 
-- [ ] `keygen` creates an Ed25519 keypair with private mode 0600 and never prints private material.
+- [ ] On supported POSIX systems, `keygen` creates an Ed25519 keypair with private mode 0600 and
+      never prints private material. On Windows, every command that reads or creates a private key
+      fails closed before key access until restrictive ACL setup and verification are implemented;
+      public-only vector verification remains available.
 - [ ] `sign` produces canonical headers byte-for-byte compatible with #7.
 - [ ] `test-vectors verify` deterministically validates every field and signature in
       `docs/agents/signing-test-vectors.json` using public inputs and keys only.
@@ -81,6 +84,9 @@ tools/agent-cli/
 - `keygen --out <dir>` (default `~/.vynema/`): `crypto.generateKeyPairSync("ed25519")`.
   - Write `agent-key.pem` (PKCS8 PEM, mode 0o600) and `agent-key.pub.pem` (SPKI PEM).
   - Print: SPKI public key as base64 (single line, no PEM armor) and its `keyId` = first 16 hex chars of SHA-256 of the raw 32-byte public key. This exact `keyId` derivation is normative and shared with #6.
+- Fail closed before any private-key read or write on Windows. POSIX mode bits do not establish or
+  verify a restrictive Windows ACL; `keygen`, `sign`, and private-key-backed vector replacement
+  stay unavailable there until an ACL implementation proves exclusive access.
 - Never log or transmit the private key. Add an explicit unit test asserting `sign` output contains no key material.
 
 ### 3. Signing (`signing.ts`) — mirror of #7
@@ -91,7 +97,11 @@ canonical = "VYNEMA1\n" + METHOD + "\n" + PATH_WITH_QUERY + "\n" + TIMESTAMP + "
 signature = base64(ed25519_sign(privateKey, utf8(canonical)))
 ```
 
-- `METHOD` uppercase; `PATH_WITH_QUERY` starts with `/api/...`, no origin; `TIMESTAMP` = seconds since epoch, decimal string; `NONCE` = `crypto.randomUUID()`; `BODY_SHA256_HEX` = lowercase hex SHA-256 of the exact request body bytes (empty body = hash of empty string).
+- `METHOD` uppercase; `PATH_WITH_QUERY` starts with `/api/...`, has no origin, and MUST equal
+  `new URL(path, dummyOrigin).pathname + search` byte-for-byte so dot segments, backslashes,
+  spaces, raw non-ASCII, and other parser rewrites are rejected in favor of canonical wire bytes;
+  `TIMESTAMP` = seconds since epoch, decimal string; `NONCE` = `crypto.randomUUID()`;
+  `BODY_SHA256_HEX` = lowercase hex SHA-256 of the exact request body bytes (empty body = hash of empty string).
 - Headers emitted: `x-vynema-agent-id`, `x-vynema-key-id`, `x-vynema-timestamp`, `x-vynema-nonce`, `x-vynema-content-sha256`, `x-vynema-signature`.
 - Export pure function `buildSignedHeaders(input: {method, path, body, agentId, keyId, privateKey, now?, nonce?}): Record<string,string>` — `now`/`nonce` injectable for deterministic tests.
 
