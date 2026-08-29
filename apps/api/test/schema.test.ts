@@ -272,6 +272,62 @@ describe("canonical schema", () => {
     ).toHaveLength(13);
   });
 
+  it("rejects null single-column text primary keys", () => {
+    const primaryKeys = [
+      ["users", "id"],
+      ["sessions", "id"],
+      ["agents", "id"],
+      ["agent_keys", "key_id"],
+      ["channels", "id"],
+      ["upload_intents", "id"],
+      ["upload_capabilities", "id"],
+      ["media_blobs", "id"],
+      ["videos", "id"],
+      ["comments", "id"],
+      ["abuse_reports", "id"],
+      ["moderation_reviews", "id"],
+      ["quota_ledger", "id"],
+      ["platform_config", "key"],
+      ["audit_events", "id"],
+    ] as const;
+
+    for (const [table, column] of primaryKeys) {
+      const columns = database.prepare(`PRAGMA table_info("${table}")`).all() as {
+        name: string;
+        type: string;
+        notnull: number;
+        pk: number;
+      }[];
+      expect(columns.find((candidate) => candidate.name === column)).toMatchObject({
+        type: "TEXT",
+        notnull: 1,
+        pk: 1,
+      });
+    }
+
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO users (id, github_id, github_login, display_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        )
+        .run(null, 2001, "null-user", "Null User", 1_000, 1_000),
+    ).toThrow();
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO platform_config (key, value, updated_at, updated_by) VALUES (?, ?, ?, ?)",
+        )
+        .run(null, "true", 1_000, "test"),
+    ).toThrow();
+    expect(() =>
+      database
+        .prepare(
+          "INSERT INTO audit_events (id, occurred_at, actor_type, action, outcome) VALUES (?, ?, ?, ?, ?)",
+        )
+        .run(null, 1_000, "system", "schema.null_pk", "denied"),
+    ).toThrow();
+  });
+
   it("enforces foreign keys, lifecycle checks, and comment length", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111");

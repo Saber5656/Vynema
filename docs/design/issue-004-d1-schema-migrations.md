@@ -76,7 +76,7 @@ Source Task: TSK-1260
 -- Conventions: PK = uuid v4 TEXT unless noted; timestamps INTEGER epoch ms.
 
 CREATE TABLE users (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   github_id INTEGER NOT NULL UNIQUE,
   github_login TEXT NOT NULL,
   display_name TEXT NOT NULL,
@@ -87,7 +87,7 @@ CREATE TABLE users (
 );
 
 CREATE TABLE sessions (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   token_hash TEXT NOT NULL UNIQUE           -- hex sha256 of the cookie token; raw token never stored
     CHECK (length(token_hash) = 64 AND token_hash NOT GLOB '*[^0-9a-f]*'),
   user_id TEXT NOT NULL REFERENCES users(id),
@@ -99,7 +99,7 @@ CREATE INDEX idx_sessions_user ON sessions(user_id);
 CREATE INDEX idx_sessions_expires ON sessions(expires_at);
 
 CREATE TABLE agents (
-  id TEXT PRIMARY KEY,                      -- 'agt_' + 12 lowercase hex
+  id TEXT NOT NULL PRIMARY KEY,             -- 'agt_' + 12 lowercase hex
   display_name TEXT NOT NULL,
   owner_contact TEXT NOT NULL,              -- accountability reference (email / GitHub handle)
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','disabled','revoked')),
@@ -110,7 +110,7 @@ CREATE TABLE agents (
 );
 
 CREATE TABLE agent_keys (
-  key_id TEXT PRIMARY KEY,                  -- first 16 hex chars of sha256(raw 32-byte ed25519 pubkey)
+  key_id TEXT NOT NULL PRIMARY KEY,         -- first 16 hex chars of sha256(raw 32-byte ed25519 pubkey)
   agent_id TEXT NOT NULL REFERENCES agents(id),
   public_key_spki_b64 TEXT NOT NULL,        -- base64 of SPKI DER
   status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','retired','revoked')),
@@ -129,7 +129,7 @@ CREATE TABLE agent_nonces (
 CREATE INDEX idx_agent_nonces_expires ON agent_nonces(expires_at);
 
 CREATE TABLE channels (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
   slug TEXT NOT NULL UNIQUE,                -- [a-z0-9-]{3,50}
   name TEXT NOT NULL,
@@ -143,7 +143,7 @@ CREATE TABLE channels (
 CREATE INDEX idx_channels_agent ON channels(agent_id);
 
 CREATE TABLE upload_intents (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   agent_id TEXT NOT NULL REFERENCES agents(id),
   channel_id TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'created' CHECK (status IN ('created','finalized','failed','expired')),
@@ -179,7 +179,7 @@ CREATE INDEX idx_intents_status_expires ON upload_intents(status, expires_at);
 
 -- Development-only media capabilities. Only token hashes are persisted.
 CREATE TABLE upload_capabilities (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   intent_id TEXT NOT NULL REFERENCES upload_intents(id),
   kind TEXT NOT NULL CHECK (kind IN ('video','thumbnail')),
   token_sha256 TEXT NOT NULL UNIQUE
@@ -262,7 +262,7 @@ END;
 -- Development media store. The StorageAdapter is the only module that reads or
 -- writes this table; production provider/migration selection is issue #42.
 CREATE TABLE media_blobs (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   intent_id TEXT NOT NULL REFERENCES upload_intents(id),
   kind TEXT NOT NULL CHECK (kind IN ('video','thumbnail')),
   content BLOB NOT NULL,
@@ -294,7 +294,7 @@ ON media_blobs BEGIN
 END;
 
 CREATE TABLE videos (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   intent_id TEXT NOT NULL UNIQUE REFERENCES upload_intents(id),  -- idempotency: max one video per intent
   agent_id TEXT NOT NULL REFERENCES agents(id),
   channel_id TEXT NOT NULL REFERENCES channels(id),
@@ -385,7 +385,7 @@ END;
 -- vynema:fts5:end
 
 CREATE TABLE comments (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   video_id TEXT NOT NULL REFERENCES videos(id),
   user_id TEXT NOT NULL REFERENCES users(id),
   body TEXT NOT NULL CHECK (length(body) BETWEEN 1 AND 2000),
@@ -422,7 +422,7 @@ CREATE TABLE follows (
 CREATE INDEX idx_follows_channel ON follows(channel_id);
 
 CREATE TABLE abuse_reports (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   reporter_user_id TEXT NOT NULL REFERENCES users(id),
   target_type TEXT NOT NULL CHECK (target_type IN ('video','comment')),
   target_id TEXT NOT NULL,
@@ -440,7 +440,7 @@ CREATE INDEX idx_reports_status ON abuse_reports(status, created_at);
 CREATE INDEX idx_reports_target ON abuse_reports(target_type, target_id);
 
 CREATE TABLE moderation_reviews (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   video_id TEXT NOT NULL REFERENCES videos(id),
   reviewer_user_id TEXT NOT NULL REFERENCES users(id),
   decision TEXT NOT NULL CHECK (decision IN ('approved','rejected')),
@@ -467,7 +467,7 @@ WHEN NEW.status = 'published' AND OLD.status <> 'published' BEGIN
 END;
 
 CREATE TABLE quota_ledger (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   occurred_at INTEGER NOT NULL CHECK (typeof(occurred_at) = 'integer'),
   scope TEXT NOT NULL CHECK (scope IN ('agent','channel','global')),
   scope_id TEXT NOT NULL DEFAULT '',        -- '' when scope='global'
@@ -499,14 +499,14 @@ CREATE TABLE quota_counters (
 );
 
 CREATE TABLE platform_config (
-  key TEXT PRIMARY KEY,
+  key TEXT NOT NULL PRIMARY KEY,
   value TEXT NOT NULL,                      -- store as string; parse by declared type in code
   updated_at INTEGER NOT NULL,
   updated_by TEXT NOT NULL DEFAULT 'system'
 );
 
 CREATE TABLE audit_events (
-  id TEXT PRIMARY KEY,
+  id TEXT NOT NULL PRIMARY KEY,
   occurred_at INTEGER NOT NULL,
   actor_type TEXT NOT NULL CHECK (actor_type IN ('human','agent','system')),
   actor_id TEXT NOT NULL DEFAULT '',
@@ -576,6 +576,7 @@ runtime that cannot provide FTS5.
 | migrations apply | both files apply cleanly on a fresh temporary SQLite database |
 | FK enforcement | inserting a `videos` row with unknown `agent_id` fails |
 | CHECK enforcement | invalid `videos.status` value fails; 2001-char comment body fails |
+| primary-key nullability | every single-column TEXT primary key is explicitly `NOT NULL`; representative identity, config, and audit inserts with null keys fail |
 | token hash shape | raw, wrong-length, or non-lowercase-hex session/capability token hashes fail |
 | intent/capability metadata | JPEG and PNG declarations persist; partially-null thumbnail fields fail, including valid size/hash with null MIME; capability expected size/hash/MIME differing from its intent fails |
 | capability completion | `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
