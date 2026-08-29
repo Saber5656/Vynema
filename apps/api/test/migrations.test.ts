@@ -57,6 +57,10 @@ function createFixture(): { database: Database; migrationsDirectory: string } {
 }
 
 function insertPublishedVideoWithApproval(target: Database): {
+  agentId: string;
+  blobId: string;
+  channelId: string;
+  intentId: string;
   reviewId: string;
   videoId: string;
 } {
@@ -172,7 +176,7 @@ function insertPublishedVideoWithApproval(target: Database): {
     )
     .run(3_000, 3_000, videoId);
 
-  return { reviewId, videoId };
+  return { agentId, blobId, channelId, intentId, reviewId, videoId };
 }
 
 async function expectStaleSearchRestoreRejection(options: {
@@ -758,6 +762,109 @@ describe("applyMigrations", () => {
       });
     } finally {
       active.close();
+    }
+  });
+
+  it("rejects restored video bindings corrupted while canonical guards were absent", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const canonicalSourcePath = join(fixtureDirectory, "canonical-video-bindings.sqlite");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2]);
+    fixture.database.close();
+    database = undefined;
+    const activeBytesBefore = readFileSync(databasePath);
+
+    const canonicalSource = openDatabase(canonicalSourcePath);
+    let mediaReferenceTriggerSql = "";
+    let videoId = "";
+    try {
+      expect(applyMigrations(canonicalSource, repositoryMigrationsDirectory)).toEqual([1, 2]);
+      ({ videoId } = insertPublishedVideoWithApproval(canonicalSource));
+      const trigger = canonicalSource
+        .prepare(
+          "SELECT sql FROM sqlite_schema WHERE type = 'trigger' AND name = 'videos_media_refs_update'",
+        )
+        .get() as { sql: string } | undefined;
+      if (!trigger?.sql) {
+        throw new Error("Canonical video media-reference trigger was not installed.");
+      }
+      mediaReferenceTriggerSql = trigger.sql;
+    } finally {
+      canonicalSource.close();
+    }
+
+    const tamperingCases: {
+      candidateName: string;
+      expectedViolation: string;
+      tamper: (candidate: Database) => void;
+    }[] = [
+      {
+        candidateName: "stale-video-intent-owner.sqlite",
+        expectedViolation: "invalid intent ownership binding",
+        tamper: (candidate) => {
+          const mismatchedAgentId = "agt_restore_mismatch";
+          candidate
+            .prepare(
+              "INSERT INTO agents (id, display_name, owner_contact, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+            )
+            .run(mismatchedAgentId, "Mismatched Restore Agent", "@restore-mismatch", 4_000, 4_000);
+          candidate
+            .prepare("UPDATE videos SET agent_id = ? WHERE id = ?")
+            .run(mismatchedAgentId, videoId);
+        },
+      },
+      {
+        candidateName: "stale-video-blob-metadata.sqlite",
+        expectedViolation: "invalid video blob binding",
+        tamper: (candidate) => {
+          candidate
+            .prepare("UPDATE videos SET size_bytes = size_bytes + 1 WHERE id = ?")
+            .run(videoId);
+        },
+      },
+    ];
+
+    for (const tamperingCase of tamperingCases) {
+      const candidatePath = join(fixtureDirectory, tamperingCase.candidateName);
+      copyFileSync(canonicalSourcePath, candidatePath);
+      const candidate = openDatabase(candidatePath);
+      try {
+        candidate.exec("DROP TRIGGER videos_media_refs_update");
+        tamperingCase.tamper(candidate);
+        candidate.exec(mediaReferenceTriggerSql);
+        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+          currentVersion: 2,
+          latestVersion: 2,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      const candidateBytesBefore = readFileSync(candidatePath);
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: databasePath,
+          backupPath: candidatePath,
+          migrationsDirectory: repositoryMigrationsDirectory,
+        }),
+      ).rejects.toThrow(tamperingCase.expectedViolation);
+
+      expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+      expect(readFileSync(candidatePath)).toEqual(candidateBytesBefore);
+      expect(existsSync(join(fixtureDirectory, "backups"))).toBe(false);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
     }
   });
 

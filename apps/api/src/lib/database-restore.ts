@@ -35,6 +35,11 @@ type VideoWithoutApprovalRow = {
   id: string;
 };
 
+type RestoredMediaBindingMismatchRow = {
+  id: string;
+  violation: string;
+};
+
 type SearchIndexMismatchRow = {
   mismatched_rowid: number;
 };
@@ -74,6 +79,55 @@ function assertRestoredPublicationEvidence(database: Database): void {
     throw new Error(
       `Restore candidate video ${videoWithoutApproval.id} is published or taken down without retained approval evidence.`,
     );
+  }
+}
+
+function assertRestoredMediaBindingConsistency(database: Database): void {
+  const applicationTables = database
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('media_blobs', 'upload_intents', 'videos') ORDER BY name",
+    )
+    .all() as SchemaTableRow[];
+
+  if (applicationTables.length !== 3) {
+    return;
+  }
+
+  const mismatch = database
+    .prepare(
+      [
+        "SELECT v.id, CASE",
+        "WHEN NOT EXISTS (",
+        "SELECT 1 FROM upload_intents i WHERE i.id = v.intent_id",
+        "AND i.agent_id = v.agent_id AND i.channel_id = v.channel_id",
+        ") THEN 'intent ownership binding'",
+        "WHEN v.video_blob_id IS NOT NULL AND NOT EXISTS (",
+        "SELECT 1 FROM media_blobs b WHERE b.id = v.video_blob_id",
+        "AND b.intent_id = v.intent_id AND b.kind = 'video'",
+        "AND b.size_bytes = v.size_bytes AND b.sha256 = v.sha256 AND b.mime = 'video/mp4'",
+        ") THEN 'video blob binding'",
+        "WHEN v.thumbnail_blob_id IS NOT NULL AND NOT EXISTS (",
+        "SELECT 1 FROM media_blobs b WHERE b.id = v.thumbnail_blob_id",
+        "AND b.intent_id = v.intent_id AND b.kind = 'thumbnail'",
+        ") THEN 'thumbnail blob binding'",
+        "END AS violation FROM videos v",
+        "WHERE NOT EXISTS (",
+        "SELECT 1 FROM upload_intents i WHERE i.id = v.intent_id",
+        "AND i.agent_id = v.agent_id AND i.channel_id = v.channel_id",
+        ") OR (v.video_blob_id IS NOT NULL AND NOT EXISTS (",
+        "SELECT 1 FROM media_blobs b WHERE b.id = v.video_blob_id",
+        "AND b.intent_id = v.intent_id AND b.kind = 'video'",
+        "AND b.size_bytes = v.size_bytes AND b.sha256 = v.sha256 AND b.mime = 'video/mp4'",
+        ")) OR (v.thumbnail_blob_id IS NOT NULL AND NOT EXISTS (",
+        "SELECT 1 FROM media_blobs b WHERE b.id = v.thumbnail_blob_id",
+        "AND b.intent_id = v.intent_id AND b.kind = 'thumbnail'",
+        ")) ORDER BY v.id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as RestoredMediaBindingMismatchRow | undefined;
+
+  if (mismatch) {
+    throw new Error(`Restore candidate video ${mismatch.id} has invalid ${mismatch.violation}.`);
   }
 }
 
@@ -137,6 +191,7 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
     assertDatabaseIntegrity(database);
     const migrationStatus = getMigrationStatus(database, migrationsDirectory);
     assertCanonicalMigratedSchema(database, migrationsDirectory, migrationStatus.currentVersion);
+    assertRestoredMediaBindingConsistency(database);
     assertRestoredPublicationEvidence(database);
     assertRestoredSearchIndexConsistency(database);
     return migrationStatus;
