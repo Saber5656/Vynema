@@ -94,6 +94,7 @@ CREATE TABLE upload_intents (
     (declared_thumbnail_bytes IS NOT NULL AND declared_thumbnail_bytes > 0
       AND declared_thumbnail_sha256 IS NOT NULL AND length(declared_thumbnail_sha256) = 64
       AND declared_thumbnail_sha256 NOT GLOB '*[^0-9a-f]*'
+      AND declared_thumbnail_mime IS NOT NULL
       AND declared_thumbnail_mime IN ('image/jpeg','image/png'))
   ),
   FOREIGN KEY (channel_id, agent_id) REFERENCES channels(id, agent_id)

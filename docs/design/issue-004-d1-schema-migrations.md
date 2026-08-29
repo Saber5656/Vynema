@@ -169,6 +169,7 @@ CREATE TABLE upload_intents (
     (declared_thumbnail_bytes IS NOT NULL AND declared_thumbnail_bytes > 0
       AND declared_thumbnail_sha256 IS NOT NULL AND length(declared_thumbnail_sha256) = 64
       AND declared_thumbnail_sha256 NOT GLOB '*[^0-9a-f]*'
+      AND declared_thumbnail_mime IS NOT NULL
       AND declared_thumbnail_mime IN ('image/jpeg','image/png'))
   ),
   FOREIGN KEY (channel_id, agent_id) REFERENCES channels(id, agent_id)
@@ -576,7 +577,7 @@ runtime that cannot provide FTS5.
 | FK enforcement | inserting a `videos` row with unknown `agent_id` fails |
 | CHECK enforcement | invalid `videos.status` value fails; 2001-char comment body fails |
 | token hash shape | raw, wrong-length, or non-lowercase-hex session/capability token hashes fail |
-| intent/capability metadata | JPEG and PNG declarations persist; partially-null thumbnail fields fail; capability expected size/hash/MIME differing from its intent fails |
+| intent/capability metadata | JPEG and PNG declarations persist; partially-null thumbnail fields fail, including valid size/hash with null MIME; capability expected size/hash/MIME differing from its intent fails |
 | capability completion | `used_at` without the matching verified BLOB fails; BLOB insert + `used_at` in one transaction succeeds; injected failure rolls both back |
 | media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail |
 | BLOB length | `length(content) != size_bytes` fails |

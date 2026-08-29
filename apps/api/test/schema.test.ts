@@ -379,6 +379,35 @@ describe("canonical schema", () => {
       database
         .prepare(
           [
+            "INSERT INTO upload_intents (",
+            "id, agent_id, channel_id, declared_video_bytes, declared_video_sha256,",
+            "declared_thumbnail_bytes, declared_thumbnail_sha256, declared_thumbnail_mime,",
+            "declared_mime, declared_duration_seconds, title, provenance_json, created_at, expires_at",
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+          ].join(" "),
+        )
+        .run(
+          "int_44444444-4444-4444-8444-444444444444",
+          "agt_111111111111",
+          "chn_11111111-1111-4111-8111-111111111111",
+          VIDEO_BYTES.length,
+          VIDEO_HASH,
+          THUMBNAIL_BYTES.length,
+          THUMBNAIL_HASH,
+          null,
+          "video/mp4",
+          60,
+          "Thumbnail MIME missing",
+          "{}",
+          1_000,
+          100_000,
+        ),
+    ).toThrow();
+
+    expect(() =>
+      database
+        .prepare(
+          [
             "INSERT INTO upload_capabilities (",
             "id, intent_id, kind, token_sha256, expected_size_bytes, expected_sha256,",
             "expected_mime, expires_at, created_at",
