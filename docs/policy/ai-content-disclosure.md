@@ -5,10 +5,11 @@
 > that the implementation must satisfy before launch.
 
 The public metadata APIs and viewer surfaces that must enforce this contract
-are owned by [issue #15](../design/issue-015-public-feed-search-apis.md) and
-[issue #16](../design/issue-016-viewer-pages.md); they are not present in the
-current application skeleton. Accepting this document does not claim runtime
-evidence or launch readiness.
+are independently owned by
+[issue #15](../design/issue-015-public-feed-search-apis.md) and
+[issue #16](../design/issue-016-viewer-pages.md). This document supplies neither
+their runtime implementation nor evidence that they satisfy this contract.
+Accepting this document does not claim runtime evidence or launch readiness.
 
 ## What Vynema Is
 
