@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -70,5 +70,17 @@ describe("openDatabase", () => {
     expect(
       readdirSync(temporaryDirectory).filter((name) => name.includes(".bak.temporary-")),
     ).toEqual([]);
+  });
+
+  it("publishes backup snapshots with owner-only permissions", async () => {
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "vynema-backup-mode-"));
+    const sourcePath = join(temporaryDirectory, "source.sqlite");
+    const destinationPath = join(temporaryDirectory, "destination.bak");
+    database = openDatabase(sourcePath);
+    database.exec("CREATE TABLE records (value TEXT NOT NULL)");
+
+    await expect(backupDatabase(database, destinationPath)).resolves.toBeUndefined();
+
+    expect(statSync(destinationPath).mode & 0o777).toBe(0o600);
   });
 });

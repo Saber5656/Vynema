@@ -1,4 +1,12 @@
-import { existsSync, linkSync, mkdirSync, mkdtempSync, rmSync, rmdirSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  linkSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  rmdirSync,
+} from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import type { DatabaseSync as NodeDatabaseSync } from "node:sqlite";
@@ -81,6 +89,7 @@ export function backupDatabase(database: Database, destinationPath: string): Pro
     // Build and validate in an exclusively owned directory, then publish with
     // a hard link so an existing destination is never overwritten.
     database.prepare("VACUUM INTO ?").run(temporaryPath);
+    chmodSync(temporaryPath, 0o600);
 
     const backupCopy = openDatabase(temporaryPath);
 

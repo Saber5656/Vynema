@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   copyFileSync,
   existsSync,
   linkSync,
@@ -8,6 +9,7 @@ import {
   readdirSync,
   rmSync,
   symlinkSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1009,6 +1011,8 @@ describe("applyMigrations", () => {
 
     const pristine = openDatabase(pristinePath);
     pristine.close();
+    chmodSync(databasePath, 0o600);
+    chmodSync(pristinePath, 0o644);
 
     const result = await restoreDatabaseFromBackup({
       activeDatabasePath: databasePath,
@@ -1022,6 +1026,8 @@ describe("applyMigrations", () => {
     });
     expect(result.safetyBackupPath).not.toBeNull();
     expect(existsSync(result.safetyBackupPath ?? "")).toBe(true);
+    expect(statSync(result.safetyBackupPath ?? "").mode & 0o777).toBe(0o600);
+    expect(statSync(databasePath).mode & 0o777).toBe(0o600);
     expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual([]);
 
     const restored = openDatabase(databasePath);
