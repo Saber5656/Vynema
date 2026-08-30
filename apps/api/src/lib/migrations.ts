@@ -57,6 +57,22 @@ export type MigrationCapabilities = Readonly<{
   fts5: boolean;
 }>;
 
+export type TimestampedBackupValidation =
+  | Readonly<{
+      kind: "repository";
+      migrationsDirectory: string;
+    }>
+  | Readonly<{
+      kind: "integrity-only";
+    }>;
+
+export type TimestampedBackupOptions = Readonly<{
+  backupDirectory?: string;
+  label?: string;
+  now?: Date;
+  validation: TimestampedBackupValidation;
+}>;
+
 export type SearchIndexMode = "fts5" | "portable";
 
 type UserVersionPragma = {
@@ -570,17 +586,28 @@ function uniqueBackupPath(
 export async function createTimestampedBackup(
   database: Database,
   databasePath: string,
-  label = "manual",
-  backupDirectory = join(dirname(databasePath), "backups"),
-  now = new Date(),
+  options: TimestampedBackupOptions,
 ): Promise<string> {
+  const label = options.label ?? "manual";
+  const backupDirectory = options.backupDirectory ?? join(dirname(databasePath), "backups");
+  const now = options.now ?? new Date();
+
   if (!/^[a-z0-9][a-z0-9-]*$/.test(label)) {
     throw new Error("Backup label must contain only lowercase letters, digits, and hyphens.");
   }
 
   mkdirSync(backupDirectory, { recursive: true });
   const backupPath = uniqueBackupPath(backupDirectory, databasePath, label, now);
-  await backupDatabase(database, backupPath);
+  const validation = options.validation;
+  await backupDatabase(
+    database,
+    backupPath,
+    validation.kind === "repository"
+      ? (snapshot) => {
+          getMigrationStatus(snapshot, validation.migrationsDirectory);
+        }
+      : undefined,
+  );
   return backupPath;
 }
 
@@ -598,13 +625,12 @@ export async function applyMigrationsWithBackup(
     return { appliedVersions: [], backupPath: null };
   }
 
-  const backupPath = await createTimestampedBackup(
-    database,
-    databasePath,
-    `before-v${String(firstPending.version).padStart(4, "0")}`,
+  const backupPath = await createTimestampedBackup(database, databasePath, {
     backupDirectory,
+    label: `before-v${String(firstPending.version).padStart(4, "0")}`,
     now,
-  );
+    validation: { kind: "repository", migrationsDirectory },
+  });
 
   try {
     return {

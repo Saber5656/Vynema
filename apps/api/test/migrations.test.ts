@@ -22,6 +22,7 @@ import { restoreDatabaseFromBackup } from "../src/lib/database-restore.js";
 import {
   applyMigrations,
   applyMigrationsWithBackup,
+  createTimestampedBackup,
   detectMigrationCapabilities,
   getMigrationStatus,
   getSearchIndexMode,
@@ -869,6 +870,43 @@ describe("applyMigrations", () => {
       ),
     ).resolves.toEqual({ appliedVersions: [], backupPath: null });
     expect(readdirSync(backupDirectory)).toHaveLength(1);
+  });
+
+  it("does not publish a timestamped backup with stale search contents", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const backupDirectory = join(fixtureDirectory, "manual-backups");
+    expect(
+      applyMigrations(fixture.database, repositoryMigrationsDirectory, { fts5: false }),
+    ).toEqual([1, 2, 3]);
+    const { videoId } = insertPublishedVideoWithApproval(fixture.database);
+    const video = fixture.database
+      .prepare("SELECT rowid FROM videos WHERE id = ?")
+      .get(videoId) as { rowid: number };
+    fixture.database
+      .prepare("UPDATE videos_fts SET title = ? WHERE rowid = ?")
+      .run("Stale manual-backup title", video.rowid);
+    const sourceBytesBefore = readFileSync(databasePath);
+
+    await expect(
+      createTimestampedBackup(fixture.database, databasePath, {
+        backupDirectory,
+        now: new Date("2026-08-30T00:00:00.000Z"),
+        validation: { kind: "repository", migrationsDirectory: repositoryMigrationsDirectory },
+      }),
+    ).rejects.toThrow("Database search index contents do not match videos.");
+
+    expect(readFileSync(databasePath)).toEqual(sourceBytesBefore);
+    expect(readdirSync(backupDirectory)).toEqual([]);
+    expect(
+      readdirSync(fixtureDirectory).filter((name) => name.includes(".bak.temporary-")),
+    ).toEqual([]);
   });
 
   it("rejects an incompatible restore candidate without replacing the active database", async () => {

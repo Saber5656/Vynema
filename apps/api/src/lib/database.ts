@@ -12,6 +12,7 @@ import { basename, dirname, join } from "node:path";
 import type { DatabaseSync as NodeDatabaseSync } from "node:sqlite";
 
 export type Database = NodeDatabaseSync;
+export type BackupSnapshotValidator = (snapshot: Database) => void;
 
 const nodeSqliteModule = "node:sqlite";
 const { DatabaseSync } = createRequire(import.meta.url)(
@@ -69,7 +70,11 @@ export function assertDatabaseIntegrity(database: Database): void {
   }
 }
 
-export function backupDatabase(database: Database, destinationPath: string): Promise<void> {
+export function backupDatabase(
+  database: Database,
+  destinationPath: string,
+  validateSnapshot?: BackupSnapshotValidator,
+): Promise<void> {
   const destinationDirectory = dirname(destinationPath);
   mkdirSync(destinationDirectory, { recursive: true });
 
@@ -95,6 +100,7 @@ export function backupDatabase(database: Database, destinationPath: string): Pro
 
     try {
       assertDatabaseIntegrity(backupCopy);
+      validateSnapshot?.(backupCopy);
     } finally {
       backupCopy.close();
     }

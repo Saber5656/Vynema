@@ -523,11 +523,13 @@ export async function restoreDatabaseFromBackup(
       const current = openDatabase(activeDatabasePath);
 
       try {
-        safetyBackupPath = await createTimestampedBackup(
-          current,
-          activeDatabasePath,
-          "before-restore",
-        );
+        safetyBackupPath = await createTimestampedBackup(current, activeDatabasePath, {
+          label: "before-restore",
+          // Preserve the current database even when schema/data drift is
+          // the reason a verified restore is needed. The low-level helper
+          // still enforces SQLite and foreign-key integrity.
+          validation: { kind: "integrity-only" },
+        });
       } finally {
         current.close();
       }

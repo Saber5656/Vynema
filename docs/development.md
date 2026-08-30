@@ -113,7 +113,9 @@ pnpm --filter @vynema/api db:inspect
 The output includes `searchIndexMode` (`fts5` or `portable`) so downstream
 search debugging never has to infer the installed mode from a failed query.
 
-Create an additional verified backup without applying migrations:
+Create an additional verified backup without applying migrations. The command
+publishes no `.bak` file unless the snapshot passes migration metadata,
+repository-schema, SQLite/FK, and search-index parity validation:
 
 ```sh
 pnpm --filter @vynema/api db:backup
@@ -160,8 +162,9 @@ external-content `integrity-check` against `videos`. A stale index fails before
 the safety backup or active-database replacement.
 
 Reset the disposable local database only. The explicit `--yes` guard is
-required; an existing database is backed up before removal, and the fresh
-database is migrated with its own pre-migration backup:
+required; an existing database must pass the same repository validation and be
+backed up before removal. Validation failure leaves the database and sidecars
+in place. The fresh database is migrated with its own pre-migration backup:
 
 ```sh
 pnpm --filter @vynema/api db:reset -- --yes

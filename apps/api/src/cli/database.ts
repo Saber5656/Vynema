@@ -50,7 +50,9 @@ async function backup(): Promise<void> {
   const database = openDatabase(databasePath);
 
   try {
-    const backupPath = await createTimestampedBackup(database, databasePath);
+    const backupPath = await createTimestampedBackup(database, databasePath, {
+      validation: { kind: "repository", migrationsDirectory },
+    });
     print({ databasePath, backupPath });
   } finally {
     database.close();
@@ -124,7 +126,10 @@ async function reset(confirmed: boolean): Promise<void> {
     const current = openDatabase(databasePath);
 
     try {
-      safetyBackupPath = await createTimestampedBackup(current, databasePath, "before-reset");
+      safetyBackupPath = await createTimestampedBackup(current, databasePath, {
+        label: "before-reset",
+        validation: { kind: "repository", migrationsDirectory },
+      });
     } finally {
       current.close();
     }
