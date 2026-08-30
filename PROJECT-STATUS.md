@@ -37,6 +37,7 @@ The current product direction is:
 | GitHub hardening | Phase 0 active | Protected-branch rulesets, checks-only CI, secret scanning, and the security-sensitive PR sign-off policy are active. This is not a release or deployment gate. |
 | Current requirements | Current baseline exists | `docs/requirements/vynema-mvp-requirements.md` is the issue #1 implementation contract and links the current architecture and ADR index. |
 | Current architecture | Current baseline exists | `docs/architecture/vynema-architecture.md` and `docs/architecture/adr/` define local provider-independent development; production provider and migration decisions remain blocked on issue #42. |
+| Public policy documentation | Current pre-alpha baseline exists | The [AI disclosure](docs/policy/ai-content-disclosure.md), [terms](docs/policy/terms-baseline.md), and [moderation](docs/policy/moderation-policy.md) documents are aligned with current requirements and design contracts. Runtime evidence remains with #4/#11/#12/#13/#15/#16; counsel and release approval remain separate launch gates. |
 | Application foundation | Local skeleton exists | `docs/development.md` documents the Node/pnpm workspace, local API/SPA, SQLite bootstrap, and checks. |
 
 ## Current Product Assumptions

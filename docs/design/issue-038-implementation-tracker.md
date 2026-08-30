@@ -117,7 +117,7 @@ contract is fixed, but its vector-consumption integration and ready PR require
 - [x] #21 Checks-only CI (deployment remains blocked on #42)
 - [ ] #55 Admin audit, observability docs, runbooks, and ops status (#22B)
 - [ ] #29 Provider-independent IaC posture (provisioning blocked on #42)
-- [ ] #36 Policy docs accepted
+- [ ] #36 Pre-alpha policy documentation baseline (owner acceptance pending)
 - [ ] #23 Security review closed (owner sign-off)
 - [ ] #24 Launch readiness & go/no-go
 - [x] #1 requirements baseline accepted
@@ -139,7 +139,7 @@ stay unchecked.
 | #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | PR #60 and PR #59 prerequisites are satisfied; this close-out PR itself must merge | Accepted by this close-out; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
-| #36 | PR #43 contains the public policy documents | Owner and counsel approval, plus #13 runtime moderation evidence, are still missing | Open; unchecked |
+| #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance and this close-out PR merge are the #36 closure gates. Counsel approval remains a #24 launch gate; #4/#11/#12/#13/#15/#16 independently own their runtime evidence | Open dependency; unchecked until owner acceptance and this close-out PR merge |
 
 The technical foundation for the implementation waves is present on `main`.
 Issue #21 is complete without adding deployment, release, provider bindings, or
@@ -178,8 +178,9 @@ than historical local branch names.
   feature audit emitters.
 - #35S owns keygen/signing/vectors. #56 owns upload/finalize/status and starts
   only after #8, #10, and #18 merge.
-- #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented;
-  their remaining acceptance gates stay explicit.
+- #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented.
+  Closing #36 accepts its versioned pre-alpha documents; it does not satisfy
+  #4/#11/#12/#13/#15/#16 runtime acceptance or #24's counsel/release gates.
 
 ## Cross-issue contracts (quick index)
 
@@ -198,7 +199,7 @@ than historical local branch names.
 | Audit action registry and metadata redaction | #22A/#22 | #5, #14, all later feature emitters, #55 |
 | Whole-product E2E and boundary evidence | #20 | #55, #23, #24, #42 |
 | Admin audit/runbook evidence | #22B/#55 | #23, #24, #42 |
-| Report/moderation enums | #36 = #4 DDL | #13, #37 |
+| Report/moderation enums | #36 policy baseline, mirrored byte-for-byte by #4 DDL and #13 design | #4, #11, #12, #13, #37 |
 
 Post-MVP (not in the waves): #31 automated review layer.
 
