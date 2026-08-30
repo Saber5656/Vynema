@@ -311,7 +311,7 @@ async function expectStaleSearchRestoreRejection(options: {
   }
 }
 
-afterEach(() => {
+afterEach(async () => {
   database?.close();
   database = undefined;
 
@@ -319,6 +319,11 @@ afterEach(() => {
     rmSync(temporaryDirectory, { recursive: true, force: true });
     temporaryDirectory = undefined;
   }
+
+  // Vitest 3's worker RPC has a fixed 60-second response timeout. This file
+  // intentionally performs long synchronous SQLite integrity checks, so yield
+  // after each isolated fixture to let pending task updates reach the runner.
+  await new Promise<void>((resolve) => setImmediate(resolve));
 });
 
 describe("applyMigrations", () => {
