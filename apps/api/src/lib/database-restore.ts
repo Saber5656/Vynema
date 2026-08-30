@@ -12,7 +12,6 @@ import {
   assertCanonicalMigratedSchema,
   createTimestampedBackup,
   getMigrationStatus,
-  getSearchIndexMode,
   type MigrationStatus,
 } from "./migrations.js";
 
@@ -62,10 +61,6 @@ type RestoredMediaBlobContentRow = {
 
 type RestoredRateLimitMismatchRow = {
   key: string;
-};
-
-type SearchIndexMismatchRow = {
-  mismatched_rowid: number;
 };
 
 export function removeDatabaseSidecars(path: string): void {
@@ -466,55 +461,6 @@ function restorePathsReferenceSameFile(activeDatabasePath: string, backupPath: s
   return activeStats.dev === backupStats.dev && activeStats.ino === backupStats.ino;
 }
 
-function assertRestoredSearchIndexConsistency(database: Database): void {
-  const applicationTables = database
-    .prepare(
-      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('videos', 'videos_fts') ORDER BY name",
-    )
-    .all() as SchemaTableRow[];
-
-  if (applicationTables.length !== 2) {
-    return;
-  }
-
-  if (getSearchIndexMode(database) === "fts5") {
-    try {
-      // rank=1 makes FTS5 compare its internal index with the external
-      // `videos` content table instead of checking only its own structures.
-      database
-        .prepare("INSERT INTO videos_fts(videos_fts, rank) VALUES('integrity-check', 1)")
-        .run();
-      return;
-    } catch (cause) {
-      throw new Error("Restore candidate search index contents do not match videos.", {
-        cause,
-      });
-    }
-  }
-
-  const mismatch = database
-    .prepare(
-      [
-        "SELECT mismatched_rowid FROM (",
-        "SELECT v.rowid AS mismatched_rowid FROM videos v",
-        "LEFT JOIN videos_fts f ON f.rowid = v.rowid",
-        "WHERE f.rowid IS NULL",
-        "OR CAST(f.title AS BLOB) <> CAST(v.title AS BLOB)",
-        "OR CAST(f.description AS BLOB) <> CAST(v.description AS BLOB)",
-        "UNION ALL",
-        "SELECT f.rowid AS mismatched_rowid FROM videos_fts f",
-        "LEFT JOIN videos v ON v.rowid = f.rowid",
-        "WHERE v.rowid IS NULL",
-        ") LIMIT 1",
-      ].join(" "),
-    )
-    .get() as SearchIndexMismatchRow | undefined;
-
-  if (mismatch) {
-    throw new Error("Restore candidate search index contents do not match videos.");
-  }
-}
-
 function validateRestoreCandidate(path: string, migrationsDirectory: string): MigrationStatus {
   if (!existsSync(path) || !statSync(path).isFile()) {
     throw new Error(`Backup file does not exist: ${path}`);
@@ -531,7 +477,6 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
     assertRestoredMediaBindingConsistency(database);
     assertRestoredRateLimitConsistency(database);
     assertRestoredPublicationEvidence(database);
-    assertRestoredSearchIndexConsistency(database);
     return migrationStatus;
   } finally {
     database.close();

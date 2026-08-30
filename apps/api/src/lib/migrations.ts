@@ -78,6 +78,10 @@ type SearchIndexSchemaRow = {
   sql: string | null;
 };
 
+type SearchIndexMismatchRow = {
+  mismatched_rowid: number;
+};
+
 type SchemaObjectRow = {
   type: string;
   name: string;
@@ -116,6 +120,53 @@ export function getSearchIndexMode(database: Database): SearchIndexMode {
   }
 
   return /\bUSING\s+fts5\b/i.test(row.sql) ? "fts5" : "portable";
+}
+
+function assertSearchIndexParity(database: Database): void {
+  const applicationTables = database
+    .prepare(
+      "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('videos', 'videos_fts') ORDER BY name",
+    )
+    .all() as { name: string }[];
+
+  if (applicationTables.length !== 2) {
+    return;
+  }
+
+  if (getSearchIndexMode(database) === "fts5") {
+    try {
+      // rank=1 compares the FTS5 index against its external `videos` content
+      // table rather than checking only the index's internal structures.
+      database
+        .prepare("INSERT INTO videos_fts(videos_fts, rank) VALUES('integrity-check', 1)")
+        .run();
+      return;
+    } catch (cause) {
+      throw new Error("Database search index contents do not match videos.", { cause });
+    }
+  }
+
+  const mismatch = database
+    .prepare(
+      [
+        "SELECT mismatched_rowid FROM (",
+        "SELECT v.rowid AS mismatched_rowid FROM videos v",
+        "LEFT JOIN videos_fts f ON f.rowid = v.rowid",
+        "WHERE f.rowid IS NULL",
+        "OR CAST(f.title AS BLOB) <> CAST(v.title AS BLOB)",
+        "OR CAST(f.description AS BLOB) <> CAST(v.description AS BLOB)",
+        "UNION ALL",
+        "SELECT f.rowid AS mismatched_rowid FROM videos_fts f",
+        "LEFT JOIN videos v ON v.rowid = f.rowid",
+        "WHERE v.rowid IS NULL",
+        ") LIMIT 1",
+      ].join(" "),
+    )
+    .get() as SearchIndexMismatchRow | undefined;
+
+  if (mismatch) {
+    throw new Error("Database search index contents do not match videos.");
+  }
 }
 
 function renderMigrationSql(sql: string, capabilities: MigrationCapabilities): string {
@@ -271,6 +322,7 @@ export function getMigrationStatus(
   if (currentVersion > 0) {
     assertCanonicalMigratedSchema(database, migrationsDirectory, currentVersion);
     assertDatabaseIntegrity(database);
+    assertSearchIndexParity(database);
   }
 
   return {

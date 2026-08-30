@@ -296,7 +296,7 @@ async function expectStaleSearchRestoreRejection(options: {
       backupPath: options.candidatePath,
       migrationsDirectory: repositoryMigrationsDirectory,
     }),
-  ).rejects.toThrow("Restore candidate search index contents do not match videos.");
+  ).rejects.toThrow("Database search index contents do not match videos.");
 
   expect(readFileSync(options.activeDatabasePath)).toEqual(options.activeBytesBefore);
   expect(readFileSync(options.candidatePath)).toEqual(candidateBytesBefore);
@@ -2054,7 +2054,7 @@ describe("applyMigrations", () => {
     }
   }, 45_000);
 
-  it("rejects a restored portable search index whose content is stale", async () => {
+  it("rejects a stale portable search index during status, startup, and restore", async () => {
     const fixture = createFixture();
     const fixtureDirectory = temporaryDirectory;
 
@@ -2087,11 +2087,19 @@ describe("applyMigrations", () => {
       expect(
         candidate.prepare("SELECT title FROM videos_fts WHERE rowid = ?").get(video.rowid),
       ).toEqual({ title: "Stale portable title" });
-      expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-        currentVersion: 3,
-        latestVersion: 3,
-        pendingMigrations: [],
-      });
+      expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+        "Database search index contents do not match videos.",
+      );
+      const rejectedBackupDirectory = join(fixtureDirectory, "stale-status-backups");
+      await expect(
+        applyMigrationsWithBackup(
+          candidate,
+          candidatePath,
+          repositoryMigrationsDirectory,
+          rejectedBackupDirectory,
+        ),
+      ).rejects.toThrow("Database search index contents do not match videos.");
+      expect(existsSync(rejectedBackupDirectory)).toBe(false);
     } finally {
       candidate.close();
     }
@@ -2105,7 +2113,7 @@ describe("applyMigrations", () => {
   });
 
   it.runIf(RUNTIME_HAS_FTS5)(
-    "rejects a restored FTS5 index whose external-content entries are stale",
+    "rejects a stale FTS5 external-content index during migration status validation and restore",
     async () => {
       const fixture = createFixture();
       const fixtureDirectory = temporaryDirectory;
@@ -2141,11 +2149,9 @@ describe("applyMigrations", () => {
         expect(
           candidate.prepare("SELECT rowid FROM videos_fts WHERE videos_fts MATCH ?").all("Restore"),
         ).toEqual([]);
-        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-          currentVersion: 3,
-          latestVersion: 3,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+          "Database search index contents do not match videos.",
+        );
       } finally {
         candidate.close();
       }

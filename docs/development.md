@@ -91,6 +91,12 @@ Show the current and latest migration versions and list pending files:
 pnpm --filter @vynema/api db:status
 ```
 
+For every migrated database, status also verifies SQLite and foreign-key
+integrity, the repository migration schema, and exact `videos`/search-index
+content parity. API startup and `db:migrate` use the same status gate, so a
+stale portable or FTS5 index fails closed before the server starts or a
+migration backup is created; these commands never rebuild the index silently.
+
 Apply pending migrations. A verified timestamped backup is created before any
 SQL runs; the command prints both the backup path and applied versions:
 
