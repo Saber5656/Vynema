@@ -6,9 +6,9 @@
 
 The values below match [issue #4's schema contract](../design/issue-004-d1-schema-migrations.md)
 and [issue #13's moderation contract](../design/issue-013-abuse-reports-takedown-revocation.md).
-The runtime schema and report/moderation routes are not present in the current
-application skeleton; their implementation and tests remain owned by those
-issues.
+These policy documents do not themselves implement the runtime schema,
+publication-state writer, manual-review flow, or report/moderation routes;
+implementation and tests are owned by issues #4, #11, #12, and #13.
 
 ## Review Model
 
