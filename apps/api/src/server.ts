@@ -6,7 +6,7 @@ import { resolve } from "node:path";
 import { buildApp } from "./app.js";
 import type { Env } from "./env.js";
 import { openDatabase } from "./lib/database.js";
-import { applyMigrations } from "./lib/migrations.js";
+import { applyMigrationsWithBackup } from "./lib/migrations.js";
 
 const HOST = "127.0.0.1";
 const PORT = 8787;
@@ -19,7 +19,11 @@ const databasePath = resolve(repositoryRoot, process.env.VYNEMA_DB_PATH ?? ".loc
 const database = openDatabase(databasePath);
 
 try {
-  const appliedVersions = applyMigrations(database, migrationsDirectory);
+  const migrationResult = await applyMigrationsWithBackup(
+    database,
+    databasePath,
+    migrationsDirectory,
+  );
   const env: Env = {
     db: database,
     environment: "development",
@@ -40,9 +44,9 @@ try {
     },
     () => {
       const migrationSummary =
-        appliedVersions.length === 0
+        migrationResult.appliedVersions.length === 0
           ? "no pending migrations"
-          : `applied migrations ${appliedVersions.join(", ")}`;
+          : `applied migrations ${migrationResult.appliedVersions.join(", ")} after backup ${migrationResult.backupPath}`;
       console.log(`Vynema is running at http://${HOST}:${PORT} (${migrationSummary}).`);
     },
   );

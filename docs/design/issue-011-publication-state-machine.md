@@ -106,7 +106,12 @@ lost CAS path.
 
 ### 2. `publishVideo(env, {videoId, reviewerUserId, requestId, extraStatements?})` (called by #12 approve; NO agent-facing publish endpoint exists in MVP — ADR-006)
 
-`extraStatements?: PreparedStatement[]` is appended to the publication transaction — #12 passes its `moderation_reviews` INSERT here so the review record and the state change commit atomically. `rejectVideo` takes the same parameter.
+`extraStatements?: PreparedStatement[]` is part of the publication transaction —
+#12 passes its `moderation_reviews` INSERT here so the review record and the
+state change commit atomically. For approval, execute that INSERT immediately
+before the conditional status UPDATE: the #4 schema rejects a transition to
+`published` unless an approved review already exists in the same transaction.
+`rejectVideo` takes the same parameter.
 
 Sequence:
 
@@ -116,10 +121,11 @@ Sequence:
    `CONFLICT` and publication cannot begin. Then require
    `publication_enabled`, quota capacity, active channel, and active agent —
    video stays `pending_review` on any failure.
-3. In one local SQLite transaction, conditionally update the video from
-   `pending_review` to `published`, set `published_at`, increment the per-agent
-   and global publication counters only when their caps permit it, append the
-   ledger rows, and write `publish.ok`. The immutable `video_blob_id` and
+3. In one local SQLite transaction, insert the approved review supplied by #12,
+   conditionally update the video from `pending_review` to `published`, set
+   `published_at`, increment the per-agent and global publication counters only
+   when their caps permit it, append the ledger rows, and write `publish.ok`.
+   The immutable `video_blob_id` and
    `thumbnail_blob_id` do not change. If a cap guard fails, roll back and return
    429. If the status CAS affects zero rows, roll back all quota/audit writes,
    re-load, and apply the §1a idempotent/409 rule.
