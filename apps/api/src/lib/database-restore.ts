@@ -15,6 +15,9 @@ import {
   type MigrationStatus,
 } from "./migrations.js";
 
+const RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES = 1024 * 1024;
+const RESTORE_MEDIA_BLOB_HASH_SAVEPOINT = "restore_media_blob_hash_snapshot";
+
 export type RestoreDatabaseOptions = {
   activeDatabasePath: string;
   backupPath: string;
@@ -53,10 +56,15 @@ type RestoredUploadProvenanceMismatchRow = {
   id: string;
 };
 
-type RestoredMediaBlobContentRow = {
-  content: Uint8Array;
+type RestoredMediaBlobMetadataRow = {
+  content_length: number;
   id: string;
   sha256: string;
+  size_bytes: number;
+};
+
+type RestoredMediaBlobChunkRow = {
+  content_chunk: unknown;
 };
 
 type RestoredRateLimitMismatchRow = {
@@ -144,6 +152,78 @@ function assertRestoredPublicationEvidence(database: Database): void {
   }
 }
 
+function assertRestoredMediaBlobContentConsistency(database: Database): void {
+  database.exec(`SAVEPOINT ${RESTORE_MEDIA_BLOB_HASH_SAVEPOINT}`);
+
+  try {
+    const mediaBlobs = database
+      .prepare(
+        "SELECT id, size_bytes, sha256, length(content) AS content_length FROM media_blobs ORDER BY id",
+      )
+      .iterate() as IterableIterator<RestoredMediaBlobMetadataRow>;
+    const contentChunkStatement = database.prepare(
+      "SELECT substr(content, ?, ?) AS content_chunk FROM media_blobs WHERE id = ?",
+    );
+
+    for (const mediaBlob of mediaBlobs) {
+      if (
+        !Number.isSafeInteger(mediaBlob.size_bytes) ||
+        !Number.isSafeInteger(mediaBlob.content_length) ||
+        mediaBlob.size_bytes <= 0 ||
+        mediaBlob.content_length !== mediaBlob.size_bytes
+      ) {
+        throw new Error(
+          `Restore candidate media blob ${mediaBlob.id} content length does not match its metadata.`,
+        );
+      }
+
+      const hash = createHash("sha256");
+
+      // The bounded result limits each JavaScript BLOB allocation. SQLite's
+      // native evaluation of substr() remains outside this allocation bound.
+      for (
+        let offset = 0;
+        offset < mediaBlob.content_length;
+        offset += RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES
+      ) {
+        const expectedChunkBytes = Math.min(
+          RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES,
+          mediaBlob.content_length - offset,
+        );
+        const chunkRow = contentChunkStatement.get(offset + 1, expectedChunkBytes, mediaBlob.id) as
+          RestoredMediaBlobChunkRow | undefined;
+        const contentChunk = chunkRow?.content_chunk;
+
+        if (
+          !(contentChunk instanceof Uint8Array) ||
+          contentChunk.byteLength === 0 ||
+          contentChunk.byteLength !== expectedChunkBytes
+        ) {
+          throw new Error(
+            `Restore candidate media blob ${mediaBlob.id} content chunk does not match its metadata.`,
+          );
+        }
+
+        hash.update(contentChunk);
+      }
+
+      const actualSha256 = hash.digest("hex");
+
+      if (actualSha256 !== mediaBlob.sha256) {
+        throw new Error(
+          `Restore candidate media blob ${mediaBlob.id} content does not match its SHA-256 metadata.`,
+        );
+      }
+    }
+  } finally {
+    try {
+      database.exec(`ROLLBACK TO ${RESTORE_MEDIA_BLOB_HASH_SAVEPOINT}`);
+    } finally {
+      database.exec(`RELEASE ${RESTORE_MEDIA_BLOB_HASH_SAVEPOINT}`);
+    }
+  }
+}
+
 function assertRestoredUploadProvenanceConsistency(database: Database): void {
   const applicationTables = database
     .prepare(
@@ -155,19 +235,7 @@ function assertRestoredUploadProvenanceConsistency(database: Database): void {
     return;
   }
 
-  const mediaBlobs = database
-    .prepare("SELECT id, content, sha256 FROM media_blobs ORDER BY id")
-    .iterate() as IterableIterator<RestoredMediaBlobContentRow>;
-
-  for (const mediaBlob of mediaBlobs) {
-    const actualSha256 = createHash("sha256").update(mediaBlob.content).digest("hex");
-
-    if (actualSha256 !== mediaBlob.sha256) {
-      throw new Error(
-        `Restore candidate media blob ${mediaBlob.id} content does not match its SHA-256 metadata.`,
-      );
-    }
-  }
+  assertRestoredMediaBlobContentConsistency(database);
 
   const capabilityMismatch = database
     .prepare(

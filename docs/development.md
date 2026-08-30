@@ -152,10 +152,12 @@ video and any declared-thumbnail linkage, duration/provenance equality, media
 ownership, and nonnegative rate-limit state. Canonical cleanup remains
 restorable: a rejected finalized video may have its media reference cleared,
 and an expired capability may be absent while a finalized video still retains
-its verified BLOB. A
-restore source that is the active database through the same path, a symlink,
-or a hard link is rejected before any backup or temporary restore file is
-created.
+its verified BLOB. Content hashes are computed from 1 MiB query results so
+Node.js never receives a complete restored BLOB in one JavaScript allocation.
+This bounds the JavaScript result size, not SQLite's native evaluation of the
+chunk query. A restore source that is the active database through the same
+path, a symlink, or a hard link is rejected before any backup or temporary
+restore file is created.
 Restore also verifies search-index content, not only its DDL: portable mode
 requires exact row/title/description parity with `videos`, while FTS5 runs its
 external-content `integrity-check` against `videos`. A stale index fails before

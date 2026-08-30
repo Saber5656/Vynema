@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   copyFileSync,
@@ -31,8 +32,8 @@ import {
 let database: Database | undefined;
 let temporaryDirectory: string | undefined;
 const repositoryMigrationsDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
+const RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES = 1024 * 1024;
 const RESTORE_VIDEO_BYTES = Buffer.alloc(1024, 7);
-const RESTORE_VIDEO_SHA256 = "a99c07ce93703c7390589c5b007bd9a97a8b6de29e9a920d474d4f028ce2d42c";
 const RESTORE_THUMBNAIL_BYTES = Buffer.alloc(4, 8);
 const RESTORE_THUMBNAIL_SHA256 = "918bd027f59087bef8e055f9b587b25486d58c606d8658d4ce7b1199274f6744";
 
@@ -75,9 +76,14 @@ function getCanonicalTriggerSql(target: Database, name: string): string {
   return trigger.sql;
 }
 
+type RestoreVideoFixtureOptions = {
+  videoBytes?: Uint8Array;
+  withThumbnail?: boolean;
+};
+
 function insertFinalizedVideo(
   target: Database,
-  options: { withThumbnail?: boolean } = {},
+  options: RestoreVideoFixtureOptions = {},
 ): {
   agentId: string;
   blobId: string;
@@ -96,6 +102,8 @@ function insertFinalizedVideo(
   const thumbnailCapabilityId = options.withThumbnail ? "cap_restore_thumbnail" : null;
   const thumbnailBlobId = options.withThumbnail ? "blob_restore_thumbnail" : null;
   const videoId = "vid_restore_publication";
+  const videoBytes = options.videoBytes ?? RESTORE_VIDEO_BYTES;
+  const videoSha256 = createHash("sha256").update(videoBytes).digest("hex");
 
   target
     .prepare(
@@ -121,8 +129,8 @@ function insertFinalizedVideo(
       intentId,
       agentId,
       channelId,
-      RESTORE_VIDEO_BYTES.length,
-      RESTORE_VIDEO_SHA256,
+      videoBytes.length,
+      videoSha256,
       options.withThumbnail ? RESTORE_THUMBNAIL_BYTES.length : null,
       options.withThumbnail ? RESTORE_THUMBNAIL_SHA256 : null,
       options.withThumbnail ? "image/png" : null,
@@ -141,15 +149,7 @@ function insertFinalizedVideo(
         ") VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?, ?)",
       ].join(" "),
     )
-    .run(
-      capabilityId,
-      intentId,
-      "b".repeat(64),
-      RESTORE_VIDEO_BYTES.length,
-      RESTORE_VIDEO_SHA256,
-      90_000,
-      1_100,
-    );
+    .run(capabilityId, intentId, "b".repeat(64), videoBytes.length, videoSha256, 90_000, 1_100);
   target
     .prepare("UPDATE upload_capabilities SET claimed_at = ? WHERE id = ?")
     .run(1_200, capabilityId);
@@ -157,14 +157,7 @@ function insertFinalizedVideo(
     .prepare(
       "INSERT INTO media_blobs (id, intent_id, kind, content, size_bytes, sha256, mime, created_at) VALUES (?, ?, 'video', ?, ?, ?, 'video/mp4', ?)",
     )
-    .run(
-      blobId,
-      intentId,
-      RESTORE_VIDEO_BYTES,
-      RESTORE_VIDEO_BYTES.length,
-      RESTORE_VIDEO_SHA256,
-      1_300,
-    );
+    .run(blobId, intentId, videoBytes, videoBytes.length, videoSha256, 1_300);
   target
     .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
     .run(1_400, capabilityId);
@@ -222,8 +215,8 @@ function insertFinalizedVideo(
       channelId,
       "Restore publication evidence",
       60,
-      RESTORE_VIDEO_BYTES.length,
-      RESTORE_VIDEO_SHA256,
+      videoBytes.length,
+      videoSha256,
       "{}",
       blobId,
       thumbnailBlobId,
@@ -248,7 +241,7 @@ function insertFinalizedVideo(
 
 function insertPublishedVideoWithApproval(
   target: Database,
-  options: { withThumbnail?: boolean } = {},
+  options: RestoreVideoFixtureOptions = {},
 ): {
   agentId: string;
   blobId: string;
@@ -1707,6 +1700,126 @@ describe("applyMigrations", () => {
       ).toEqual([]);
     }
   });
+
+  it("hashes restored media blobs in bounded chunks and rejects boundary or tail tampering", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const canonicalSourcePath = join(fixtureDirectory, "canonical-multi-chunk-media.sqlite");
+    const validRestorePath = join(fixtureDirectory, "valid-multi-chunk-media.sqlite");
+    const videoBytes = Buffer.alloc(2 * RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES + 17, 6);
+    const videoSha256 = createHash("sha256").update(videoBytes).digest("hex");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+    fixture.database.close();
+    database = undefined;
+    const activeBytesBefore = readFileSync(databasePath);
+
+    const canonicalSource = openDatabase(canonicalSourcePath);
+    let blobId = "";
+    let mediaBlobImmutableTriggerSql = "";
+    try {
+      expect(applyMigrations(canonicalSource, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+      ({ blobId } = insertFinalizedVideo(canonicalSource, { videoBytes }));
+      mediaBlobImmutableTriggerSql = getCanonicalTriggerSql(
+        canonicalSource,
+        "media_blob_immutable",
+      );
+    } finally {
+      canonicalSource.close();
+    }
+
+    const canonicalSourceBytes = readFileSync(canonicalSourcePath);
+    const validRestoreResult = await restoreDatabaseFromBackup({
+      activeDatabasePath: validRestorePath,
+      backupPath: canonicalSourcePath,
+      migrationsDirectory: repositoryMigrationsDirectory,
+    });
+    expect(validRestoreResult.safetyBackupPath).toBeNull();
+    expect(validRestoreResult.migrationStatus).toMatchObject({
+      currentVersion: 3,
+      latestVersion: 3,
+      pendingMigrations: [],
+    });
+    expect(readFileSync(canonicalSourcePath)).toEqual(canonicalSourceBytes);
+    const validRestore = openDatabase(validRestorePath);
+    try {
+      expect(
+        validRestore
+          .prepare(
+            "SELECT length(content) AS content_length, size_bytes, sha256 FROM media_blobs WHERE id = ?",
+          )
+          .get(blobId),
+      ).toEqual({
+        content_length: videoBytes.length,
+        sha256: videoSha256,
+        size_bytes: videoBytes.length,
+      });
+    } finally {
+      validRestore.close();
+    }
+
+    const tamperingCases = [
+      {
+        candidateName: "chunk-boundary-media-content-tamper.sqlite",
+        tamperOffset: RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES,
+      },
+      {
+        candidateName: "partial-tail-media-content-tamper.sqlite",
+        tamperOffset: videoBytes.length - 1,
+      },
+    ] as const;
+
+    for (const tamperingCase of tamperingCases) {
+      const candidatePath = join(fixtureDirectory, tamperingCase.candidateName);
+      copyFileSync(canonicalSourcePath, candidatePath);
+      const tamperedVideoBytes = Buffer.from(videoBytes);
+      tamperedVideoBytes.writeUInt8(
+        tamperedVideoBytes.readUInt8(tamperingCase.tamperOffset) ^ 0xff,
+        tamperingCase.tamperOffset,
+      );
+      const candidate = openDatabase(candidatePath);
+      try {
+        candidate.exec("DROP TRIGGER media_blob_immutable");
+        candidate
+          .prepare("UPDATE media_blobs SET content = ? WHERE id = ?")
+          .run(tamperedVideoBytes, blobId);
+        candidate.exec(mediaBlobImmutableTriggerSql);
+        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
+          currentVersion: 3,
+          latestVersion: 3,
+          pendingMigrations: [],
+        });
+      } finally {
+        candidate.close();
+      }
+
+      const candidateBytesBefore = readFileSync(candidatePath);
+      await expect(
+        restoreDatabaseFromBackup({
+          activeDatabasePath: databasePath,
+          backupPath: candidatePath,
+          migrationsDirectory: repositoryMigrationsDirectory,
+        }),
+      ).rejects.toThrow(
+        `Restore candidate media blob ${blobId} content does not match its SHA-256 metadata.`,
+      );
+
+      expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
+      expect(readFileSync(candidatePath)).toEqual(candidateBytesBefore);
+      expect(existsSync(join(fixtureDirectory, "backups"))).toBe(false);
+      expect(readdirSync(fixtureDirectory).filter((name) => name.includes(".restore-"))).toEqual(
+        [],
+      );
+      expect(
+        readdirSync(fixtureDirectory).filter((name) => name.includes("before-restore")),
+      ).toEqual([]);
+    }
+  }, 45_000);
 
   it("rejects restored upload provenance corrupted while canonical guards were absent", async () => {
     const fixture = createFixture();
