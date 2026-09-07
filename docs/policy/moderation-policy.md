@@ -4,8 +4,12 @@
 > service or production release. This document defines implementation enums and
 > the moderation behavior proposed for owner and counsel review.
 
-The values below match [issue #4's schema contract](../design/issue-004-d1-schema-migrations.md)
-and [issue #13's moderation contract](../design/issue-013-abuse-reports-takedown-revocation.md).
+The report categories and report lifecycle below match
+[issue #4's schema contract](../design/issue-004-d1-schema-migrations.md) and
+[issue #13's moderation contract](../design/issue-013-abuse-reports-takedown-revocation.md).
+The video moderation states mirror
+[issue #11's normative state machine](../design/issue-011-publication-state-machine.md)
+and #4's storage constraints.
 These policy documents do not themselves implement the runtime schema,
 publication-state writer, manual-review flow, or report/moderation routes and
 actions. Runtime implementation and tests are owned by issues #4, #6, #11,

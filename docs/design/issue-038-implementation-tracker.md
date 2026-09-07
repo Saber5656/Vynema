@@ -195,13 +195,13 @@ than historical local branch names.
 | keyId derivation | #6 §1 = #35S/#35 | #7, #46 |
 | Public visibility predicate | #15 §1 | #12, #13, #17, #37, #16, #54 |
 | Storage accounting (reservation model) | #10 (canonical) = #14 (amended) | #8, #11 |
-| Video status transitions (single writer) | #11 §1 | #12, #13 |
+| Video status enum and transitions (single writer) | #11 §1; #36 policy wording and #4 storage constraints mirror it | #12, #13 |
 | Development media write/capability contract | #9A/#9 | #8, #10, #11, #12 preview, #54 |
 | Development public media-read boundary | #9B/#54 + #15 predicate | #13, #16 integration/ready PR, #20 final, #55 runbooks |
 | Audit action registry and metadata redaction | #22A/#22 | #5, #14, all later feature emitters, #55 |
 | Whole-product E2E and boundary evidence | #20 | #55, #23, #24, #42 |
 | Admin audit/runbook evidence | #22B/#55 | #23, #24, #42 |
-| Report/moderation enums | #36 policy baseline, mirrored byte-for-byte by #4 DDL and #13 design | #4, #11, #12, #13, #37 |
+| Report category and lifecycle enums | #36 policy baseline, mirrored byte-for-byte by #4 DDL and #13 design | #4, #12, #13, #37 |
 
 Post-MVP (not in the waves): #31 automated review layer.
 

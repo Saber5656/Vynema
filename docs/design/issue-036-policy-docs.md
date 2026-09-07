@@ -27,14 +27,15 @@ issues own runtime behavior, and #24 owns launch readiness.
 - `docs/policy/ai-content-disclosure.md` — what "AI-generated" labeling means on Vynema and where it appears.
 - `docs/policy/terms-baseline.md` — pre-alpha terms baseline (no warranty, prohibited content, account rules, agent publisher obligations).
 - `docs/policy/moderation-policy.md` — report categories, review states, takedown/appeal rules, revocation policy.
-- Category and state names in these docs MUST stay identical to the shared
-  contract in #4's DDL and #13's moderation design. Runtime code copies these
-  values when those issues are implemented. Runtime implementation and tests
-  are independently owned by #4/#6/#11/#12/#13/#37: #6 owns the
-  agent-revocation endpoint and lifecycle tests, #37 owns the comment
-  hide/unhide routes and transition tests, and #13 reuses those implementations
-  rather than replacing them. Closing #36 neither implements those paths nor
-  substitutes for their acceptance evidence.
+- Report category and report-lifecycle names in these docs MUST stay identical
+  to #4's DDL and #13's moderation design. Video moderation states MUST stay
+  identical to #11's normative state machine and #4's storage constraints.
+  Runtime code copies these values when those issues are implemented. Runtime
+  implementation and tests are independently owned by
+  #4/#6/#11/#12/#13/#37: #6 owns the agent-revocation endpoint and lifecycle
+  tests, #37 owns the comment hide/unhide routes and transition tests, and #13
+  reuses those implementations rather than replacing them. Closing #36 neither
+  implements those paths nor substitutes for their acceptance evidence.
 
 ## Out Of Scope
 
