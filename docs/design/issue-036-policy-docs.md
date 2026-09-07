@@ -30,8 +30,11 @@ issues own runtime behavior, and #24 owns launch readiness.
 - Category and state names in these docs MUST stay identical to the shared
   contract in #4's DDL and #13's moderation design. Runtime code copies these
   values when those issues are implemented. Runtime implementation and tests
-  are independently owned by #4/#11/#12/#13; closing #36 neither implements
-  them nor substitutes for their acceptance evidence.
+  are independently owned by #4/#6/#11/#12/#13/#37: #6 owns the
+  agent-revocation endpoint and lifecycle tests, #37 owns the comment
+  hide/unhide routes and transition tests, and #13 reuses those implementations
+  rather than replacing them. Closing #36 neither implements those paths nor
+  substitutes for their acceptance evidence.
 
 ## Out Of Scope
 
@@ -100,7 +103,10 @@ audited; aggregate statistics may be published in the future.
    counsel.").
 2. Cross-check enum names against #4's DDL and #13's moderation contract.
    Preserve the distinction between this versioned documentation contract and
-   the runtime evidence independently produced by #4/#11/#12/#13.
+   the runtime evidence independently produced by #4/#6/#11/#12/#13/#37. #6
+   owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment
+   hide/unhide routes and transition tests, and #13 reuses those implementations
+   rather than replacing them.
 3. Keep links and state synchronized in `README.md`,
    `docs/requirements/vynema-mvp-requirements.md`, `PROJECT-STATUS.md`, and the
    #38 tracker.
@@ -112,7 +118,8 @@ audited; aggregate statistics may be published in the future.
 
 - [x] Enum names grep-verified against #4/#13's canonical design contracts;
   this documentation close-out is not reported as runtime acceptance evidence
-  for #4/#11/#12/#13.
+  for #4/#6/#11/#12/#13/#37. #13 reuses #6's agent-revocation and #37's
+  comment hide/unhide implementations rather than replacing them.
 - [x] README, requirements, project status, and #38 tracker links/state are
   synchronized by the close-out change.
 - [ ] Owner acceptance comment linked before issue closure.
@@ -120,23 +127,25 @@ audited; aggregate statistics may be published in the future.
 ## Close-out Audit (2026-08-27)
 
 PR #43 merged only the three public policy documents. It did not itself
-implement #4's SQLite schema, #11's publication-state writer, #12's
-manual-review flow, #13's report/moderation routes, or #15/#16's public
-disclosure surfaces. Those issues independently own their runtime tests and
-acceptance evidence.
+implement #4's SQLite schema, #6's agent-revocation endpoint and lifecycle
+tests, #11's publication-state writer, #12's manual-review flow, #13's
+report/moderation routes, #37's comment hide/unhide routes and transition tests,
+or #15/#16's public disclosure surfaces. #13 reuses the #6/#37 implementations
+rather than replacing them. Those issues independently own their runtime tests
+and acceptance evidence.
 
 | Acceptance area | Repository evidence | Close-out disposition |
 |---|---|---|
 | AI disclosure | `docs/policy/ai-content-disclosure.md`; FR-002 and FR-011 | Documentation contract complete; #15/#16 runtime evidence remains downstream |
 | Pre-alpha terms | `docs/policy/terms-baseline.md` | Baseline wording complete; not operative hosted-service terms |
-| Report categories and states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#11/#12/#13 independently own runtime implementation and tests |
-| Moderation actions and transparency | `docs/policy/moderation-policy.md` | Required sections complete; no runtime behavior or release is claimed |
+| Report categories and states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#6/#11/#12/#13/#37 independently own the corresponding runtime implementation and tests |
+| Moderation actions and transparency | `docs/policy/moderation-policy.md` | Required sections complete; #6 owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment hide/unhide routes and transition tests, and #13 reuses those implementations rather than replacing them; no runtime behavior or release is claimed |
 | Owner/legal gate | Issue or close-out PR comment; #24 launch checklist | Owner accepts the documentation baseline before #36 closes; counsel review remains required before hosted launch |
 
 Closing #36 therefore accepts the versioned pre-alpha policy documentation
 only. It does not approve a release, deploy a service, create legal obligations,
-or satisfy the runtime acceptance criteria owned by #4, #11, #12, #13, #15, or
-#16.
+or satisfy the runtime acceptance criteria owned by #4, #6, #11, #12, #13,
+#15, #16, or #37.
 
 ---
 Stable Issue Key: AIT-MVP-028

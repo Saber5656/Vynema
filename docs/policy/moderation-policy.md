@@ -7,8 +7,11 @@
 The values below match [issue #4's schema contract](../design/issue-004-d1-schema-migrations.md)
 and [issue #13's moderation contract](../design/issue-013-abuse-reports-takedown-revocation.md).
 These policy documents do not themselves implement the runtime schema,
-publication-state writer, manual-review flow, or report/moderation routes;
-implementation and tests are owned by issues #4, #11, #12, and #13.
+publication-state writer, manual-review flow, or report/moderation routes and
+actions. Runtime implementation and tests are owned by issues #4, #6, #11,
+#12, #13, and #37: #6 owns the agent-revocation endpoint and lifecycle tests,
+#37 owns the comment hide/unhide routes and transition tests, and #13 reuses
+those implementations in its report/moderation flow rather than replacing them.
 
 ## Review Model
 

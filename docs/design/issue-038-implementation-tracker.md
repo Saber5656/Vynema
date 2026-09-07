@@ -139,7 +139,7 @@ stay unchecked.
 | #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | PR #60 and PR #59 prerequisites are satisfied; this close-out PR itself must merge | Accepted by this close-out; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
-| #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance and this close-out PR merge are the #36 closure gates. Counsel approval remains a #24 launch gate; #4/#11/#12/#13/#15/#16 independently own their runtime evidence | Open dependency; unchecked until owner acceptance and this close-out PR merge |
+| #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance and this close-out PR merge are the #36 closure gates. Counsel approval remains a #24 launch gate; #4/#6/#11/#12/#13/#15/#16/#37 independently own their runtime evidence. #6 owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment hide/unhide routes and transition tests, and #13 reuses those implementations rather than replacing them | Open dependency; unchecked until owner acceptance and this close-out PR merge |
 
 The technical foundation for the implementation waves is present on `main`.
 Issue #21 is complete without adding deployment, release, provider bindings, or
@@ -180,7 +180,9 @@ than historical local branch names.
   only after #8, #10, and #18 merge.
 - #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented.
   Closing #36 accepts its versioned pre-alpha documents; it does not satisfy
-  #4/#11/#12/#13/#15/#16 runtime acceptance or #24's counsel/release gates.
+  #4/#6/#11/#12/#13/#15/#16/#37 runtime acceptance or #24's counsel/release
+  gates. #13 reuses #6's agent-revocation and #37's comment hide/unhide
+  implementations rather than replacing them.
 
 ## Cross-issue contracts (quick index)
 
