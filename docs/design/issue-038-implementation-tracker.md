@@ -117,7 +117,7 @@ contract is fixed, but its vector-consumption integration and ready PR require
 - [x] #21 Checks-only CI (deployment remains blocked on #42)
 - [ ] #55 Admin audit, observability docs, runbooks, and ops status (#22B)
 - [ ] #29 Provider-independent IaC posture (provisioning blocked on #42)
-- [ ] #36 Policy docs accepted
+- [ ] #36 Pre-alpha policy documentation baseline (owner accepted; close-out PR pending)
 - [ ] #23 Security review closed (owner sign-off)
 - [ ] #24 Launch readiness & go/no-go
 - [x] #1 requirements baseline accepted
@@ -140,7 +140,7 @@ stay unchecked.
 | #4 | This delivery adds the canonical local SQLite migrations, repository/config primitives, schema tests, and backup/restore/fix-forward commands | This delivery PR itself must pass review and merge; production migration remains blocked on #42 | Accepted by this delivery; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
-| #36 | PR #43 contains the public policy documents | Owner and counsel approval, plus #13 runtime moderation evidence, are still missing | Open; unchecked |
+| #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance of the exact remediated policy-file blobs is recorded on PR #64; this close-out PR merge remains the #36 closure gate. Counsel approval remains a #24 launch gate. Runtime evidence stays split across #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#17/#37/#54: #4/#13 own report lifecycle, #13/#17/#37 own report backend/video/comment hooks, #6/#7 own agent identity and request authorization, #8/#10 own source/provenance capture and persistence, #11/#12 own reviewed publication transitions/audit, #6/#13/#37 own moderation actions, #15/#16 own public disclosure, and #15/#54 own public metadata/media suppression | Open dependency; unchecked until this close-out PR merges |
 
 The technical foundation for the implementation waves is present on `main`.
 Issue #21 is complete without adding deployment, release, provider bindings, or
@@ -179,8 +179,12 @@ than historical local branch names.
   feature audit emitters.
 - #35S owns keygen/signing/vectors. #56 owns upload/finalize/status and starts
   only after #8, #10, and #18 merge.
-- #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented;
-  their remaining acceptance gates stay explicit.
+- #31 remains post-MVP. Merged #34/#36/#38 artifacts are not reimplemented.
+  Closing #36 accepts its versioned pre-alpha documents; it does not satisfy
+  #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#17/#37/#54 runtime acceptance or #24's
+  counsel/release gates. #13 reuses #6's agent-revocation and #37's comment
+  hide/unhide implementations rather than replacing them; #54 independently
+  proves anonymous public-media denial.
 
 ## Cross-issue contracts (quick index)
 
@@ -189,17 +193,19 @@ than historical local branch names.
 | ADRs (stack, conventions, quota defaults) | #2 | all |
 | DDL & enums | #4 | all backend |
 | Error codes & envelope | #19 | all APIs + web |
+| AI disclosure evidence chain | #36 policy baseline | #6/#7 identity and request authorization; #8/#10 source-agent and provenance persistence; #11/#12 reviewed publication state and audit; #15/#16 public API/UI disclosure |
 | Signing canonical string and vectors | #7 normative + #35S/#35 vectors | #8, #10, #18, #56 |
 | keyId derivation | #6 §1 = #35S/#35 | #7, #46 |
 | Public visibility predicate | #15 §1 | #12, #13, #17, #37, #16, #54 |
 | Storage accounting (reservation model) | #10 (canonical) = #14 (amended) | #8, #11 |
-| Video status transitions (single writer) | #11 §1 | #12, #13 |
+| Video status enum and transitions (single writer) | #11 §1; #36 policy wording and #4 storage constraints mirror it | #12, #13 |
 | Development media write/capability contract | #9A/#9 | #8, #10, #11, #12 preview, #54 |
 | Development public media-read boundary | #9B/#54 + #15 predicate | #13, #16 integration/ready PR, #20 final, #55 runbooks |
 | Audit action registry and metadata redaction | #22A/#22 | #5, #14, all later feature emitters, #55 |
 | Whole-product E2E and boundary evidence | #20 | #55, #23, #24, #42 |
 | Admin audit/runbook evidence | #22B/#55 | #23, #24, #42 |
-| Report/moderation enums | #36 = #4 DDL | #13, #37 |
+| Report category enum | #36 policy baseline, mirrored byte-for-byte by #4 DDL and #13 design | #13 report backend; #17 video and #37 comment category-submission hooks |
+| Report lifecycle enum and transitions | #36 policy baseline, mirrored byte-for-byte by #4 DDL and #13 design | #4 storage constraints; #13 report backend and transition evidence |
 
 Post-MVP (not in the waves): #31 automated review layer.
 
