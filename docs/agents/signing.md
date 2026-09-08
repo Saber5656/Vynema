@@ -49,6 +49,8 @@ that check is not removed.
 
 An incomplete-cleanup error lists paths that require manual inspection and warns when private key
 material may remain; inspect and remove only the affected generated artifacts before retrying.
+If cleanup observes more than one filesystem link, it removes the known output name but reports
+that an unlocated hard link may still retain the same key material.
 If descriptor closure fails persistently, the error also requires terminating the process before
 manual inspection because an open descriptor may still retain private material. Mode-bit and
 path-identity checks do not prove restrictive ACL or network/share semantics. The identity check

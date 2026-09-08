@@ -93,9 +93,10 @@ tools/agent-cli/
   payload. Verify descriptor mode, regular-file/link count, and device/inode identity; write public
   material first and private material last. On failure, close all descriptors and remove only
   invocation-created paths whose identity still matches. Report any residual path and warn that
-  private material or descriptor may remain. These checks do not prove ACL/share semantics. The
-  identity check and path unlink are not atomic, so the local account and parent directories remain
-  trusted boundaries; a same-user process can race that final interval.
+  private material or descriptor may remain. If cleanup observes an added hard link, remove the
+  known output name but report that another link may retain the same material. These checks do not
+  prove ACL/share semantics. The identity check and path unlink are not atomic, so the local account
+  and parent directories remain trusted boundaries; a same-user process can race that final interval.
 
 ### 3. Signing (`signing.ts`) — mirror of #7
 

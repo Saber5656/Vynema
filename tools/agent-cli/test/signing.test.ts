@@ -6,6 +6,7 @@ import {
   existsSync,
   fchmodSync,
   fstatSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -485,6 +486,47 @@ describe("Ed25519 key handling and CLI", () => {
     expect((thrown as Error).message).toContain("Private key material may remain");
     expect(readFileSync(privateKeyPath, "utf8")).toBe(replacement);
     expect(existsSync(publicKeyPath)).toBe(false);
+  });
+
+  it("warns when an added hard link can retain generated private material", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-cleanup-added-hard-link");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const retainedPrivateKeyPath = join(temporaryDirectory, "retained-agent-key.pem");
+    const descriptorPaths = new Map<number, string>();
+    let linked = false;
+    let thrown: unknown;
+
+    try {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          openSync: (path, flags, mode) => {
+            const fileDescriptor = openSync(path, flags, mode);
+            descriptorPaths.set(fileDescriptor, path);
+            return fileDescriptor;
+          },
+          writeFileSync: (fileDescriptor, data) => {
+            writeFileSync(fileDescriptor, data);
+            if (descriptorPaths.get(fileDescriptor)?.endsWith(PRIVATE_KEY_FILENAME) && !linked) {
+              linkSync(privateKeyPath, retainedPrivateKeyPath);
+              linked = true;
+            }
+          },
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(linked).toBe(true);
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as Error).message).toContain("additional filesystem links");
+    expect((thrown as Error).message).toContain("Private key material may remain");
+    expect(existsSync(privateKeyPath)).toBe(false);
+    expect(existsSync(publicKeyPath)).toBe(false);
+    expect(readFileSync(retainedPrivateKeyPath, "utf8")).toContain(privatePemMarker);
   });
 
   it("retries a transient descriptor-close failure before removing generated files", () => {

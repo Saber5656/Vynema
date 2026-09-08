@@ -174,6 +174,7 @@ interface TrackedGeneratedKeyFile {
 }
 
 interface KeyCleanupResult {
+  additionalLinksMayRemain: boolean;
   errors: unknown[];
   incompletePaths: string[];
   openDescriptorsMayRemain: boolean;
@@ -320,6 +321,7 @@ function cleanupGeneratedKeyFiles(
 ): KeyCleanupResult {
   const errors: unknown[] = [];
   const incompletePaths = new Set<string>();
+  let additionalLinksMayRemain = false;
   let openDescriptorsMayRemain = false;
 
   for (const file of files) {
@@ -373,6 +375,14 @@ function cleanupGeneratedKeyFiles(
       continue;
     }
 
+    if (pathStats.nlink > 1) {
+      additionalLinksMayRemain = true;
+      errors.push(
+        new Error(`Generated key artifact has additional filesystem links: ${file.path}`),
+      );
+      incompletePaths.add(file.path);
+    }
+
     try {
       operations.unlinkSync(file.path);
     } catch (error) {
@@ -393,7 +403,12 @@ function cleanupGeneratedKeyFiles(
     }
   }
 
-  return { errors, incompletePaths: [...incompletePaths], openDescriptorsMayRemain };
+  return {
+    additionalLinksMayRemain,
+    errors,
+    incompletePaths: [...incompletePaths],
+    openDescriptorsMayRemain,
+  };
 }
 
 function throwAfterGeneratedKeyCleanup(
@@ -404,12 +419,15 @@ function throwAfterGeneratedKeyCleanup(
   const cleanup = cleanupGeneratedKeyFiles(files, operations);
 
   if (cleanup.errors.length > 0) {
+    const hardLinkWarning = cleanup.additionalLinksMayRemain
+      ? " Hard-link warning: additional filesystem links may retain generated key material."
+      : "";
     const descriptorWarning = cleanup.openDescriptorsMayRemain
       ? " Open key file descriptors may remain; terminate this process before inspecting or removing residual artifacts."
       : "";
     throw new AggregateError(
       [originalError, ...cleanup.errors],
-      `Key generation failed: ${errorMessage(originalError)} Cleanup was incomplete for ${cleanup.incompletePaths.join(", ")}. Private key material may remain.${descriptorWarning} Manually inspect and remove the affected paths before retrying.`,
+      `Key generation failed: ${errorMessage(originalError)} Cleanup was incomplete for ${cleanup.incompletePaths.join(", ")}. Private key material may remain.${hardLinkWarning}${descriptorWarning} Manually inspect and remove the affected paths before retrying.`,
       { cause: originalError },
     );
   }
