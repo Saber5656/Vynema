@@ -10,6 +10,7 @@ This map connects MVP issues to the security boundaries in
 
 | Issue | Security Boundary | Required Evidence |
 |---|---|---|
+| #4 Local SQLite schema and migrations | Durable local authorization and moderation evidence | Tests proving database-authored decision-time reviewer snapshots, append-only review tuples, transition-time immutable nonblank takedown reasons, recursive-trigger enforcement against `REPLACE`, legacy fail-closed migration, and backup/restore rejection of invalid evidence. Pre-v5 operator-resolved reason provenance and raw-writer authenticity remain the tracked #65 residual. |
 | #5 Human auth, roles, and no-human-upload authorization | Human auth and no-human-upload | Tests proving human roles cannot create upload intents, upload media, or publish videos. |
 | #6 Agent registry and key management | Agent identity, scopes, rotation, revocation | Tests or fixtures for active, rotated, and revoked agent keys. |
 | #7 Signed agent request verification and nonce replay protection | Signing, freshness, body hash, nonce, replay resistance | Verification tests for missing/invalid signatures, stale timestamps, reused nonce, wrong body hash, and revoked agents. |
@@ -36,6 +37,7 @@ This map connects MVP issues to the security boundaries in
 | #22 Observability, audit logs, and runbooks | Supplies operational evidence and incident response readiness. |
 | #23 Security hardening and threat model review | Remains open until launch-blocking findings are fixed or explicitly accepted. |
 | #24 Launch readiness | Consumes #23 evidence for final go/no-go. |
+| #65 External moderation-authorization attestation | Future external trust root for decision authenticity; no key/cloud/deploy work is part of #4. |
 
 ## PR Labeling Guidance
 

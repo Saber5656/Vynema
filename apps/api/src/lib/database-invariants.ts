@@ -20,6 +20,14 @@ type VideoWithInvalidPublicationEvidenceRow = {
   id: string;
 };
 
+type ModerationReviewWithInvalidAuthorizationSnapshotRow = {
+  id: string;
+};
+
+type VideoWithInvalidTakedownReasonRow = {
+  id: string;
+};
+
 type MediaBindingMismatchRow = {
   id: string;
   violation: string;
@@ -80,7 +88,7 @@ function assertIdentityStorageConsistency(database: Database): void {
   }
 }
 
-function assertPublicationEvidence(database: Database): void {
+function assertPublicationEvidence(database: Database, schemaVersion: number): void {
   const applicationTables = database
     .prepare(
       "SELECT name FROM sqlite_schema WHERE type = 'table' AND name IN ('moderation_reviews', 'upload_intents', 'videos') ORDER BY name",
@@ -91,6 +99,14 @@ function assertPublicationEvidence(database: Database): void {
     return;
   }
 
+  const authorizationSnapshotPredicate =
+    schemaVersion >= 4
+      ? [
+          "AND r.authorization_snapshot_version = 1",
+          "AND r.reviewer_role_at_decision IN ('reviewer', 'admin')",
+          "AND r.reviewer_status_at_decision = 'active'",
+        ]
+      : [];
   const videoWithInvalidPublicationEvidence = database
     .prepare(
       [
@@ -106,6 +122,7 @@ function assertPublicationEvidence(database: Database): void {
         "SELECT 1 FROM moderation_reviews r",
         "WHERE r.video_id = v.id AND r.decision = 'approved'",
         "AND r.created_at <= v.published_at",
+        ...authorizationSnapshotPredicate,
         "))",
         "ORDER BY v.id LIMIT 1",
       ].join(" "),
@@ -116,6 +133,62 @@ function assertPublicationEvidence(database: Database): void {
     throw new Error(
       `Database video ${videoWithInvalidPublicationEvidence.id} is published or taken down without retained approval evidence or a valid publication timeline.`,
     );
+  }
+}
+
+function assertModerationReviewAuthorizationSnapshots(
+  database: Database,
+  schemaVersion: number,
+): void {
+  if (schemaVersion < 4) {
+    return;
+  }
+
+  const mismatch = database
+    .prepare(
+      [
+        "SELECT id FROM moderation_reviews",
+        "WHERE NOT (",
+        "(authorization_snapshot_version IS NULL",
+        "AND reviewer_role_at_decision IS NULL",
+        "AND reviewer_status_at_decision IS NULL)",
+        "OR (typeof(authorization_snapshot_version) = 'integer'",
+        "AND authorization_snapshot_version = 1",
+        "AND typeof(reviewer_role_at_decision) = 'text'",
+        "AND reviewer_role_at_decision IN ('reviewer', 'admin')",
+        "AND typeof(reviewer_status_at_decision) = 'text'",
+        "AND reviewer_status_at_decision = 'active')",
+        ") ORDER BY id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as ModerationReviewWithInvalidAuthorizationSnapshotRow | undefined;
+
+  if (mismatch) {
+    throw new Error(
+      `Database moderation review ${mismatch.id} has an invalid decision-time authorization snapshot.`,
+    );
+  }
+}
+
+function assertTakedownReasons(database: Database, schemaVersion: number): void {
+  if (schemaVersion < 5) {
+    return;
+  }
+
+  const mismatch = database
+    .prepare(
+      [
+        "SELECT id FROM videos WHERE (status = 'taken_down' AND (",
+        "typeof(takedown_reason) <> 'text'",
+        "OR trim(takedown_reason, char(9, 10, 11, 12, 13, 32)) = ''",
+        ")) OR (status <> 'taken_down' AND takedown_reason IS NOT NULL)",
+        "ORDER BY id LIMIT 1",
+      ].join(" "),
+    )
+    .get() as VideoWithInvalidTakedownReasonRow | undefined;
+
+  if (mismatch) {
+    throw new Error(`Database video ${mismatch.id} has invalid takedown reason evidence.`);
   }
 }
 
@@ -454,10 +527,12 @@ function assertRateLimitConsistency(database: Database): void {
   }
 }
 
-export function assertDurableRowsConsistent(database: Database): void {
+export function assertDurableRowsConsistent(database: Database, schemaVersion: number): void {
   assertIdentityStorageConsistency(database);
   assertRateLimitConsistency(database);
-  assertPublicationEvidence(database);
+  assertModerationReviewAuthorizationSnapshots(database, schemaVersion);
+  assertTakedownReasons(database, schemaVersion);
+  assertPublicationEvidence(database, schemaVersion);
   assertMediaBindingConsistency(database);
   assertUploadProvenanceConsistency(database);
   assertMediaBlobContentConsistency(database);

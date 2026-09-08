@@ -93,8 +93,9 @@ pnpm --filter @vynema/api db:status
 
 For every migrated database, status also verifies SQLite and foreign-key
 integrity, the repository migration schema, exact `videos`/search-index
-content parity, and the durable upload, publication, media, identity, and
-rate-limit evidence described below. API startup and all repository-aware
+content parity, and the durable upload, publication, moderation-authorization,
+takedown-reason, media, identity, and rate-limit evidence described below. API
+startup and all repository-aware
 database commands (`db:status`, `db:inspect`, `db:migrate`, `db:backup`,
 `db:restore`, and the pre-removal phase of `db:reset`) use this shared gate.
 A semantic mismatch therefore fails closed before the server starts, a backup
@@ -159,12 +160,18 @@ backup and against the copied candidate.
 For the Vynema schema, every restored `published` or `taken_down` video must
 belong to an intent finalized no later than publication and retain at least one
 `moderation_reviews` row with `decision = 'approved'` whose `created_at` is no
-later than the video's `published_at`; otherwise restore fails before a safety
-backup or active-database replacement. This is historical publication
-evidence: a later reviewer role or account-status change does not invalidate an
-approval that was valid when publication occurred. Restore also requires
-`published_at >= videos.created_at` and, for a taken-down video,
-`taken_down_at >= published_at`.
+later than the video's `published_at` and whose database-authored authorization
+snapshot records version `1`, an at-decision role of `reviewer` or `admin`, and
+at-decision status `active`; otherwise restore fails before a safety backup or
+active-database replacement. This is historical publication evidence: a later
+reviewer role or account-status change does not invalidate an approval that was
+authorized when recorded, and a later promotion cannot authorize an unverified
+legacy decision. A pre-v4 restore candidate with any `published` or
+`taken_down` row is rejected because that history cannot be backfilled from
+current user state. Restore also requires `published_at >= videos.created_at`
+and, for a taken-down video, `taken_down_at >= published_at` plus a nonblank TEXT
+reason after trimming the six ASCII whitespace characters. The reason is
+retained byte-for-byte and never synthesized or normalized by restore.
 The shared repository validation also verifies the upload
 claim/BLOB/use/finalize timeline, finalized
 video and any declared-thumbnail linkage, duration/provenance equality, media
@@ -215,6 +222,21 @@ correct an unapplied SQL file, or add the next numbered fix-forward migration.
 provenance, finalization, one-way publication/takedown state machine, immutable
 publication approval/timestamps, finalized duration/declared-thumbnail
 evidence, and rate-limit guards.
+`0004_snapshot_review_authorization.sql` adds database-authored decision-time
+reviewer role/status evidence, makes each complete review row append-only, and
+rejects legacy terminal rows whose authorization cannot be proven. Existing
+non-public reviews remain as all-NULL unverified legacy records and cannot be
+backfilled. `0005_require_takedown_reason.sql` requires and freezes a nonblank
+TEXT reason at the takedown transition, requires every non-taken-down row to
+keep that field NULL, and rejects invalid legacy reason state rather than
+inventing one. A manually supplied pre-v5 reason is operator-resolved evidence;
+SQLite cannot prove that v4 captured it when the takedown occurred. The
+supported database opener enables and verifies `foreign_keys` plus
+`recursive_triggers`; status and migration fail if either is disabled, so
+`INSERT OR REPLACE` cannot bypass DELETE-based evidence guards on a supported
+connection. Database CLI failures print a bounded message-only `cause` chain so
+the operator sees the specific safe migration preflight reason without a stack
+trace.
 Every migration must contain a `-- recovery:` note. Generated backup collision
 files and restore-temporary files are ignored by Git. Backups are built and
 validated in an exclusively owned temporary directory, then atomically linked

@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 
 import { openDatabase } from "../lib/database.js";
 import { removeDatabaseSidecars, restoreDatabaseFromBackup } from "../lib/database-restore.js";
+import { formatErrorWithCauses } from "../lib/error-format.js";
 import {
   applyMigrationsWithBackup,
   createTimestampedBackup,
@@ -178,7 +179,6 @@ async function main(): Promise<void> {
 try {
   await main();
 } catch (error) {
-  const message = error instanceof Error ? error.message : "Unknown database command failure.";
-  process.stderr.write(`Database command failed: ${message}\n`);
+  process.stderr.write(`Database command failed: ${formatErrorWithCauses(error)}\n`);
   process.exitCode = 1;
 }

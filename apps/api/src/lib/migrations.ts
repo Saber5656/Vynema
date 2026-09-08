@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 import {
+  assertDatabaseRuntimeGuards,
   assertDatabaseIntegrity,
   backupDatabase,
   openDatabase,
@@ -328,6 +329,7 @@ export function getMigrationStatus(
   database.exec(`SAVEPOINT ${MIGRATION_STATUS_VALIDATION_SAVEPOINT}`);
 
   try {
+    assertDatabaseRuntimeGuards(database);
     assertRuntimeCompatibleSchema(database);
     const currentVersion = readUserVersion(database);
     assertPristineVersionZeroDatabase(database, currentVersion);
@@ -351,7 +353,7 @@ export function getMigrationStatus(
     if (currentVersion > 0) {
       assertCanonicalMigratedSchema(database, migrationsDirectory, currentVersion);
       assertSearchIndexParity(database);
-      assertDurableRowsConsistent(database);
+      assertDurableRowsConsistent(database, currentVersion);
     }
 
     status = {
@@ -493,13 +495,6 @@ export function applyMigrations(
   capabilities = detectMigrationCapabilities(database),
   maximumVersion?: number,
 ): number[] {
-  const foreignKeys = database.prepare("PRAGMA foreign_keys").get() as
-    { foreign_keys: number } | undefined;
-
-  if (foreignKeys?.foreign_keys !== 1) {
-    throw new Error("SQLite foreign-key enforcement is disabled.");
-  }
-
   const status = getMigrationStatus(database, migrationsDirectory);
   const targetVersion = maximumVersion ?? status.latestVersion;
 

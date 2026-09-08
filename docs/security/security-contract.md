@@ -63,8 +63,29 @@ This is an operational constraint, not a relaxation of security review.
 ### Moderation And Audit
 
 - Report, takedown, unpublish, revocation, and maintainer override actions are auditable.
+- A moderation decision records database-authored reviewer/admin role and active
+  status at decision time. Publication uses that immutable stored evidence, not
+  mutable current account state; the complete review tuple is append-only.
+- Takedown requires an immutable nonblank TEXT reason and timestamp recorded by
+  the transition itself; non-taken-down rows retain a NULL reason. Migration,
+  startup, repository backup, and restore fail closed on missing, prewritten,
+  or transient authorization/takedown evidence and never invent historical
+  values.
+- Supported SQLite connections enforce both foreign keys and recursive
+  triggers. Status and migration reject disabled guards so the implicit DELETE
+  performed by `INSERT OR REPLACE` cannot bypass append-only review or finalized
+  video evidence triggers.
 - Audit records include actor, action, target, timestamp, and outcome.
 - Audit logging must not expose secrets or private media URLs.
+
+Database-authored evidence is a Phase 0 local integrity control, not external
+attestation. A process with raw SQLite write access remains trusted and can
+disable connection guards, replace triggers, or forge a self-consistent
+database. A nonblank reason carried from v4 is only operator-resolved pre-v5
+evidence; SQLite cannot prove its decision-time provenance. [Issue
+#65](https://github.com/Saber5656/Vynema/issues/65) owns the future external
+trust root and signed authorization evidence; it must not be implemented by
+creating unapproved keys, credentials, paid resources, or deployments.
 
 ### Repository Automation
 

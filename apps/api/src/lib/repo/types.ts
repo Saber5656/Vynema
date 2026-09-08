@@ -190,6 +190,9 @@ export type ModerationReviewRow = {
   decision: "approved" | "rejected";
   reason: string;
   created_at: number;
+  reviewer_role_at_decision: "reviewer" | "admin" | null;
+  reviewer_status_at_decision: "active" | null;
+  authorization_snapshot_version: 1 | null;
 };
 
 export type QuotaLedgerRow = {

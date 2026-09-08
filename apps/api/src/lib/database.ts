@@ -23,6 +23,26 @@ type ForeignKeysPragma = {
   foreign_keys: number;
 };
 
+type RecursiveTriggersPragma = {
+  recursive_triggers: number;
+};
+
+export function assertDatabaseRuntimeGuards(database: Database): void {
+  const foreignKeys = database.prepare("PRAGMA foreign_keys").get() as
+    ForeignKeysPragma | undefined;
+
+  if (foreignKeys?.foreign_keys !== 1) {
+    throw new Error("SQLite foreign-key enforcement is disabled.");
+  }
+
+  const recursiveTriggers = database.prepare("PRAGMA recursive_triggers").get() as
+    RecursiveTriggersPragma | undefined;
+
+  if (recursiveTriggers?.recursive_triggers !== 1) {
+    throw new Error("SQLite recursive-trigger enforcement is disabled.");
+  }
+}
+
 export function openDatabase(path: string): Database {
   mkdirSync(dirname(path), { recursive: true });
 
@@ -30,11 +50,8 @@ export function openDatabase(path: string): Database {
 
   try {
     database.exec("PRAGMA foreign_keys = ON");
-    const pragma = database.prepare("PRAGMA foreign_keys").get() as ForeignKeysPragma | undefined;
-
-    if (pragma?.foreign_keys !== 1) {
-      throw new Error("SQLite foreign-key enforcement could not be enabled.");
-    }
+    database.exec("PRAGMA recursive_triggers = ON");
+    assertDatabaseRuntimeGuards(database);
 
     return database;
   } catch (error) {

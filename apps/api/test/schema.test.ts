@@ -217,7 +217,7 @@ function findSearchRows(target: Database, token: string): unknown[] {
 beforeEach(() => {
   temporaryDirectory = mkdtempSync(join(tmpdir(), "vynema-schema-"));
   database = openDatabase(join(temporaryDirectory, "database.sqlite"));
-  expect(applyMigrations(database, migrationsDirectory)).toEqual([1, 2, 3]);
+  expect(applyMigrations(database, migrationsDirectory)).toEqual([1, 2, 3, 4, 5]);
 });
 
 afterEach(() => {
@@ -232,10 +232,10 @@ describe("canonical schema", () => {
       foreign_keys: 1,
     });
     expect(database.prepare("PRAGMA user_version").get()).toEqual({
-      user_version: 3,
+      user_version: 5,
     });
     expect(() => {
-      assertCanonicalMigratedSchema(database, migrationsDirectory, 3);
+      assertCanonicalMigratedSchema(database, migrationsDirectory, 5);
     }).not.toThrow();
 
     const tables = (
@@ -1684,6 +1684,290 @@ describe("canonical schema", () => {
     });
   });
 
+  it("captures reviewer authorization at decision time without client-authored snapshot fields", () => {
+    insertAgentChannel();
+    insertIntent("int_review_snapshot");
+    insertCapability("int_review_snapshot", "video", "cap_review_snapshot");
+    insertBlob("int_review_snapshot", "video", "blob_review_snapshot");
+    insertPendingVideo("vid_review_snapshot", "int_review_snapshot", {
+      videoBlobId: "blob_review_snapshot",
+    });
+    database
+      .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+      .run(1_400, "cap_review_snapshot");
+    database
+      .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+      .run(2_100, "int_review_snapshot");
+
+    const insertReviewer = database.prepare(
+      "INSERT INTO users (id, github_id, github_login, display_name, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'active', ?, ?)",
+    );
+    insertReviewer.run(
+      "usr_snapshot_reviewer",
+      7_001,
+      "snapshot-reviewer",
+      "Snapshot Reviewer",
+      "reviewer",
+      1_000,
+      1_000,
+    );
+    insertReviewer.run(
+      "usr_snapshot_admin",
+      7_002,
+      "snapshot-admin",
+      "Snapshot Admin",
+      "admin",
+      1_000,
+      1_000,
+    );
+
+    const insertReview = database.prepare(
+      "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    insertReview.run(
+      "rev_snapshot_reviewer",
+      "vid_review_snapshot",
+      "usr_snapshot_reviewer",
+      "approved",
+      "Approved by reviewer.",
+      2_500,
+    );
+    insertReview.run(
+      "rev_snapshot_admin",
+      "vid_review_snapshot",
+      "usr_snapshot_admin",
+      "rejected",
+      "Rejected by admin.",
+      2_600,
+    );
+
+    expect(
+      database
+        .prepare(
+          "SELECT id, reviewer_role_at_decision, reviewer_status_at_decision, authorization_snapshot_version FROM moderation_reviews ORDER BY id",
+        )
+        .all(),
+    ).toEqual([
+      {
+        id: "rev_snapshot_admin",
+        reviewer_role_at_decision: "admin",
+        reviewer_status_at_decision: "active",
+        authorization_snapshot_version: 1,
+      },
+      {
+        id: "rev_snapshot_reviewer",
+        reviewer_role_at_decision: "reviewer",
+        reviewer_status_at_decision: "active",
+        authorization_snapshot_version: 1,
+      },
+    ]);
+  });
+
+  it("rejects unauthorized reviewers and client-authored authorization snapshots", () => {
+    insertAgentChannel();
+    insertUser();
+    insertIntent("int_review_authorization");
+    insertPendingVideo("vid_review_authorization", "int_review_authorization");
+    const insertUserWithAuthorization = database.prepare(
+      "INSERT INTO users (id, github_id, github_login, display_name, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+    );
+    insertUserWithAuthorization.run(
+      "usr_banned_reviewer",
+      7_101,
+      "banned-reviewer",
+      "Banned Reviewer",
+      "reviewer",
+      "banned",
+      1_000,
+      1_000,
+    );
+    insertUserWithAuthorization.run(
+      "usr_banned_admin",
+      7_102,
+      "banned-admin",
+      "Banned Admin",
+      "admin",
+      "banned",
+      1_000,
+      1_000,
+    );
+    insertUserWithAuthorization.run(
+      "usr_active_reviewer",
+      7_103,
+      "active-reviewer",
+      "Active Reviewer",
+      "reviewer",
+      "active",
+      1_000,
+      1_000,
+    );
+
+    const insertReview = database.prepare(
+      "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+    );
+    for (const [reviewId, reviewerId] of [
+      ["rev_viewer", "usr_11111111-1111-4111-8111-111111111111"],
+      ["rev_banned_reviewer", "usr_banned_reviewer"],
+      ["rev_banned_admin", "usr_banned_admin"],
+    ] as const) {
+      expect(() =>
+        insertReview.run(
+          reviewId,
+          "vid_review_authorization",
+          reviewerId,
+          "Unauthorized decision.",
+          2_500,
+        ),
+      ).toThrow("moderation review requires an active reviewer or admin");
+    }
+
+    const clientAuthoredSnapshots = [
+      {
+        columns: "reviewer_role_at_decision",
+        placeholders: "?",
+        values: ["reviewer"],
+      },
+      {
+        columns: "reviewer_status_at_decision",
+        placeholders: "?",
+        values: ["active"],
+      },
+      {
+        columns:
+          "reviewer_role_at_decision, reviewer_status_at_decision, authorization_snapshot_version",
+        placeholders: "?, ?, ?",
+        values: ["reviewer", "active", 1],
+      },
+    ] as const;
+
+    for (const [index, snapshot] of clientAuthoredSnapshots.entries()) {
+      expect(() =>
+        database
+          .prepare(
+            `INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at, ${snapshot.columns}) VALUES (?, ?, ?, 'approved', ?, ?, ${snapshot.placeholders})`,
+          )
+          .run(
+            `rev_client_snapshot_${index}`,
+            "vid_review_authorization",
+            "usr_active_reviewer",
+            "Client-authored snapshot.",
+            2_500,
+            ...snapshot.values,
+          ),
+      ).toThrow();
+    }
+
+    expect(database.prepare("SELECT COUNT(*) AS count FROM moderation_reviews").get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it("keeps the complete moderation decision tuple append-only", () => {
+    insertAgentChannel();
+    insertIntent("int_review_append_only");
+    insertPendingVideo("vid_review_append_only", "int_review_append_only");
+    database
+      .prepare(
+        "INSERT INTO users (id, github_id, github_login, display_name, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'reviewer', 'active', ?, ?)",
+      )
+      .run(
+        "usr_append_only_reviewer",
+        7_201,
+        "append-only-reviewer",
+        "Append-only Reviewer",
+        1_000,
+        1_000,
+      );
+    database
+      .prepare(
+        "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+      )
+      .run(
+        "rev_append_only",
+        "vid_review_append_only",
+        "usr_append_only_reviewer",
+        "Immutable decision.",
+        2_500,
+      );
+
+    const mutations = [
+      ["id", "rev_append_only_rewritten"],
+      ["video_id", "vid_missing"],
+      ["reviewer_user_id", "usr_missing"],
+      ["decision", "rejected"],
+      ["reason", "Rewritten decision."],
+      ["created_at", 2_600],
+      ["reviewer_role_at_decision", "admin"],
+      ["reviewer_status_at_decision", null],
+      ["authorization_snapshot_version", null],
+    ] as const;
+
+    for (const [column, value] of mutations) {
+      expect(() =>
+        database
+          .prepare(`UPDATE moderation_reviews SET ${column} = ? WHERE id = ?`)
+          .run(value, "rev_append_only"),
+      ).toThrow("moderation review evidence is append-only");
+    }
+    expect(() =>
+      database
+        .prepare("UPDATE moderation_reviews SET reason = reason WHERE id = ?")
+        .run("rev_append_only"),
+    ).toThrow("moderation review evidence is append-only");
+    expect(() =>
+      database.prepare("DELETE FROM moderation_reviews WHERE id = ?").run("rev_append_only"),
+    ).toThrow("moderation review evidence is append-only");
+    expect(() =>
+      database
+        .prepare(
+          "INSERT OR REPLACE INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+        )
+        .run(
+          "rev_append_only",
+          "vid_review_append_only",
+          "usr_append_only_reviewer",
+          "Replacement decision.",
+          2_600,
+        ),
+    ).toThrow("moderation review id is immutable");
+
+    const reviewRowid = database
+      .prepare("SELECT rowid FROM moderation_reviews WHERE id = ?")
+      .get("rev_append_only") as { rowid: number };
+    expect(() =>
+      database
+        .prepare(
+          "INSERT OR REPLACE INTO moderation_reviews (rowid, id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, ?, 'approved', ?, ?)",
+        )
+        .run(
+          reviewRowid.rowid,
+          "rev_append_only_replacement",
+          "vid_review_append_only",
+          "usr_append_only_reviewer",
+          "Rewritten through a hidden rowid conflict.",
+          2_600,
+        ),
+    ).toThrow("moderation review evidence is append-only");
+
+    expect(
+      database
+        .prepare(
+          "SELECT id, video_id, reviewer_user_id, decision, reason, created_at, reviewer_role_at_decision, reviewer_status_at_decision, authorization_snapshot_version FROM moderation_reviews",
+        )
+        .get(),
+    ).toEqual({
+      id: "rev_append_only",
+      video_id: "vid_review_append_only",
+      reviewer_user_id: "usr_append_only_reviewer",
+      decision: "approved",
+      reason: "Immutable decision.",
+      created_at: 2_500,
+      reviewer_role_at_decision: "reviewer",
+      reviewer_status_at_decision: "active",
+      authorization_snapshot_version: 1,
+    });
+  });
+
   it("enforces publication lifecycle timestamps and retained media", () => {
     insertAgentChannel();
     insertIntent("int_11111111-1111-4111-8111-111111111111");
@@ -1826,50 +2110,64 @@ describe("canonical schema", () => {
         .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
         .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
     ).toThrow(
-      /published videos require an approval review|publication requires a current approval no later than published_at/,
+      /published videos require an approval review|publication requires an authorized approval no later than published_at/,
     );
     expect(() =>
       database
         .prepare(
-          "UPDATE videos SET status = 'taken_down', published_at = ?, taken_down_at = ? WHERE id = ?",
+          "UPDATE videos SET status = 'taken_down', published_at = ?, taken_down_at = ?, takedown_reason = ? WHERE id = ?",
         )
-        .run(2_500, 2_600, "vid_11111111-1111-4111-8111-111111111111"),
+        .run(
+          2_500,
+          2_600,
+          "Cannot take down a pending video.",
+          "vid_11111111-1111-4111-8111-111111111111",
+        ),
     ).toThrow(
-      /taken down videos require retained publication approval|invalid video status transition/,
+      /taken down videos require retained authorized publication approval|invalid video status transition/,
     );
-
-    database
-      .prepare(
-        "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
-      )
-      .run(
-        "rev_11111111-1111-4111-8111-111111111111",
-        "vid_11111111-1111-4111-8111-111111111111",
-        "usr_11111111-1111-4111-8111-111111111111",
-        "Approved for publication.",
-        2_500,
-      );
 
     expect(() =>
       database
         .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
         .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
     ).toThrow(
-      /published videos require an approval review|publication requires a current approval no later than published_at/,
+      /published videos require an approval review|publication requires an authorized approval no later than published_at/,
     );
+    const insertApproval = database.prepare(
+      "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+    );
+    expect(() =>
+      insertApproval.run(
+        "rev_viewer_attempt",
+        "vid_11111111-1111-4111-8111-111111111111",
+        "usr_11111111-1111-4111-8111-111111111111",
+        "Viewer cannot approve.",
+        2_500,
+      ),
+    ).toThrow("moderation review requires an active reviewer or admin");
     database
       .prepare("UPDATE users SET role = 'reviewer', status = 'banned' WHERE id = ?")
       .run("usr_11111111-1111-4111-8111-111111111111");
     expect(() =>
-      database
-        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
-        .run(3_000, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow(
-      /published videos require an approval review|publication requires a current approval no later than published_at/,
-    );
+      insertApproval.run(
+        "rev_banned_attempt",
+        "vid_11111111-1111-4111-8111-111111111111",
+        "usr_11111111-1111-4111-8111-111111111111",
+        "Banned reviewer cannot approve.",
+        2_500,
+      ),
+    ).toThrow("moderation review requires an active reviewer or admin");
     database
       .prepare("UPDATE users SET status = 'active' WHERE id = ?")
       .run("usr_11111111-1111-4111-8111-111111111111");
+    insertApproval.run(
+      "rev_11111111-1111-4111-8111-111111111111",
+      "vid_11111111-1111-4111-8111-111111111111",
+      "usr_11111111-1111-4111-8111-111111111111",
+      "Approved for publication.",
+      2_500,
+    );
     insertIntent("int_publish_before_finalize");
     insertCapability("int_publish_before_finalize", "video", "cap_publish_before_finalize");
     insertBlob("int_publish_before_finalize", "video", "blob_publish_before_finalize");
@@ -1885,7 +2183,7 @@ describe("canonical schema", () => {
         "vid_publish_before_finalize",
         "usr_11111111-1111-4111-8111-111111111111",
         "Approval cannot bypass finalize.",
-        2_500,
+        1_500,
       );
     expect(() =>
       database
@@ -1896,15 +2194,10 @@ describe("canonical schema", () => {
       database
         .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
         .run(2_400, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("publication requires a current approval no later than published_at");
+    ).toThrow("publication requires an authorized approval no later than published_at");
     database
-      .prepare("UPDATE moderation_reviews SET created_at = ? WHERE id = ?")
-      .run(1_500, "rev_11111111-1111-4111-8111-111111111111");
-    expect(() =>
-      database
-        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
-        .run(1_900, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("publication requires a finalized upload intent");
+      .prepare("UPDATE users SET role = 'viewer', status = 'banned' WHERE id = ?")
+      .run("usr_11111111-1111-4111-8111-111111111111");
     database
       .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
       .run(3_000, "vid_11111111-1111-4111-8111-111111111111");
@@ -1913,6 +2206,9 @@ describe("canonical schema", () => {
         .prepare("SELECT status, published_at FROM videos WHERE id = ?")
         .get("vid_11111111-1111-4111-8111-111111111111"),
     ).toEqual({ status: "published", published_at: 3_000 });
+    database
+      .prepare("UPDATE users SET role = 'reviewer', status = 'active' WHERE id = ?")
+      .run("usr_11111111-1111-4111-8111-111111111111");
     expect(() =>
       database
         .prepare(
@@ -1941,7 +2237,7 @@ describe("canonical schema", () => {
       database
         .prepare("UPDATE moderation_reviews SET decision = 'approved' WHERE id = ?")
         .run("rev_rejected_before_publication"),
-    ).toThrow("publication approval evidence is immutable");
+    ).toThrow("moderation review evidence is append-only");
     database
       .prepare(
         "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
@@ -1957,27 +2253,27 @@ describe("canonical schema", () => {
       database
         .prepare("UPDATE moderation_reviews SET created_at = ? WHERE id = ?")
         .run(2_900, "rev_late_approval"),
-    ).toThrow("publication approval evidence is immutable");
+    ).toThrow("moderation review evidence is append-only");
     expect(() =>
       database
         .prepare("DELETE FROM moderation_reviews WHERE id = ?")
         .run("rev_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("publication approval evidence is immutable");
+    ).toThrow("moderation review evidence is append-only");
     expect(() =>
       database
         .prepare("UPDATE moderation_reviews SET decision = 'rejected' WHERE id = ?")
         .run("rev_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("publication approval evidence is immutable");
+    ).toThrow("moderation review evidence is append-only");
     expect(() =>
       database
         .prepare("UPDATE moderation_reviews SET created_at = ? WHERE id = ?")
         .run(3_500, "rev_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("publication approval evidence is immutable");
+    ).toThrow("moderation review evidence is append-only");
     expect(() =>
       database
         .prepare("UPDATE moderation_reviews SET reason = ? WHERE id = ?")
         .run("Rewritten after publication.", "rev_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("publication approval evidence is immutable");
+    ).toThrow("moderation review evidence is append-only");
     expect(() =>
       database
         .prepare("UPDATE videos SET status = 'rejected', rejected_at = ? WHERE id = ?")
@@ -1993,12 +2289,18 @@ describe("canonical schema", () => {
       .run("usr_11111111-1111-4111-8111-111111111111");
     expect(() =>
       database
-        .prepare("UPDATE videos SET status = 'taken_down', taken_down_at = ? WHERE id = ?")
-        .run(2_500, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("taken down videos require retained publication approval and a valid timestamp");
+        .prepare(
+          "UPDATE videos SET status = 'taken_down', taken_down_at = ?, takedown_reason = ? WHERE id = ?",
+        )
+        .run(2_500, "Invalid timestamp.", "vid_11111111-1111-4111-8111-111111111111"),
+    ).toThrow(
+      "taken down videos require retained authorized publication approval and a valid timestamp",
+    );
     database
-      .prepare("UPDATE videos SET status = 'taken_down', taken_down_at = ? WHERE id = ?")
-      .run(4_000, "vid_11111111-1111-4111-8111-111111111111");
+      .prepare(
+        "UPDATE videos SET status = 'taken_down', taken_down_at = ?, takedown_reason = ? WHERE id = ?",
+      )
+      .run(4_000, "Repeated policy violation.", "vid_11111111-1111-4111-8111-111111111111");
     expect(
       database
         .prepare("SELECT status, published_at, taken_down_at FROM videos WHERE id = ?")
@@ -2008,7 +2310,7 @@ describe("canonical schema", () => {
       database
         .prepare("UPDATE videos SET taken_down_at = ? WHERE id = ?")
         .run(4_100, "vid_11111111-1111-4111-8111-111111111111"),
-    ).toThrow("taken_down_at is immutable after takedown");
+    ).toThrow("takedown evidence is immutable");
     expect(() =>
       database
         .prepare("UPDATE videos SET status = 'published' WHERE id = ?")
@@ -2016,6 +2318,134 @@ describe("canonical schema", () => {
     ).toThrow(
       /invalid video status transition|published videos must transition from pending review/,
     );
+  });
+
+  it("requires and freezes a nonblank takedown reason", () => {
+    insertAgentChannel();
+    database
+      .prepare(
+        "INSERT INTO users (id, github_id, github_login, display_name, role, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'reviewer', 'active', ?, ?)",
+      )
+      .run("usr_takedown_reviewer", 7_301, "takedown-reviewer", "Takedown Reviewer", 1_000, 1_000);
+
+    const insertPublishedVideo = (suffix: string): string => {
+      const intentId = `int_takedown_${suffix}`;
+      const capabilityId = `cap_takedown_${suffix}`;
+      const blobId = `blob_takedown_${suffix}`;
+      const videoId = `vid_takedown_${suffix}`;
+      insertIntent(intentId);
+      insertCapability(intentId, "video", capabilityId);
+      insertBlob(intentId, "video", blobId);
+      insertPendingVideo(videoId, intentId, { videoBlobId: blobId });
+      database
+        .prepare("UPDATE upload_capabilities SET used_at = ? WHERE id = ?")
+        .run(1_400, capabilityId);
+      database
+        .prepare("UPDATE upload_intents SET status = 'finalized', finalized_at = ? WHERE id = ?")
+        .run(2_100, intentId);
+      database
+        .prepare(
+          "INSERT INTO moderation_reviews (id, video_id, reviewer_user_id, decision, reason, created_at) VALUES (?, ?, ?, 'approved', ?, ?)",
+        )
+        .run(
+          `rev_takedown_${suffix}`,
+          videoId,
+          "usr_takedown_reviewer",
+          "Approved for publication.",
+          2_500,
+        );
+      database
+        .prepare("UPDATE videos SET status = 'published', published_at = ? WHERE id = ?")
+        .run(3_000, videoId);
+      return videoId;
+    };
+
+    const videoId = insertPublishedVideo("invalid_then_valid");
+    const takeDown = database.prepare(
+      "UPDATE videos SET status = 'taken_down', taken_down_at = ?, takedown_reason = ? WHERE id = ?",
+    );
+    expect(() =>
+      database
+        .prepare("UPDATE videos SET takedown_reason = ? WHERE id = ?")
+        .run("Stale prewritten reason.", videoId),
+    ).toThrow("only taken down videos may retain a takedown reason");
+    expect(
+      database.prepare("SELECT takedown_reason FROM videos WHERE id = ?").get(videoId),
+    ).toEqual({ takedown_reason: null });
+
+    const invalidReasons = [null, "", " ", "\t\n\v\f\r ", Buffer.from("not-text")];
+
+    for (const reason of invalidReasons) {
+      expect(() => takeDown.run(4_000, reason, videoId)).toThrow(
+        "taken down videos require a nonblank text reason",
+      );
+      expect(database.prepare("SELECT status FROM videos WHERE id = ?").get(videoId)).toEqual({
+        status: "published",
+      });
+    }
+
+    const preservedReason = "  repeated policy violation  ";
+    takeDown.run(4_000, preservedReason, videoId);
+    expect(
+      database
+        .prepare("SELECT status, taken_down_at, takedown_reason FROM videos WHERE id = ?")
+        .get(videoId),
+    ).toEqual({
+      status: "taken_down",
+      taken_down_at: 4_000,
+      takedown_reason: preservedReason,
+    });
+    expect(
+      database
+        .prepare("UPDATE videos SET takedown_reason = ? WHERE id = ?")
+        .run(preservedReason, videoId).changes,
+    ).toBe(1);
+    for (const replacement of ["changed", null, ""]) {
+      expect(() =>
+        database
+          .prepare("UPDATE videos SET takedown_reason = ? WHERE id = ?")
+          .run(replacement, videoId),
+      ).toThrow("takedown evidence is immutable");
+    }
+
+    expect(() =>
+      database
+        .prepare(
+          [
+            "INSERT OR REPLACE INTO videos (",
+            "id, intent_id, agent_id, channel_id, status, title, description, duration_seconds,",
+            "size_bytes, sha256, ai_generated, provenance_json, video_blob_id, thumbnail_blob_id,",
+            "published_at, rejected_at, taken_down_at, takedown_reason, created_at, updated_at",
+            ") SELECT id, intent_id, agent_id, channel_id, 'pending_review', title, description,",
+            "duration_seconds, size_bytes, sha256, ai_generated, provenance_json, video_blob_id,",
+            "thumbnail_blob_id, NULL, NULL, NULL, NULL, created_at, updated_at",
+            "FROM videos WHERE id = ?",
+          ].join(" "),
+        )
+        .run(videoId),
+    ).toThrow("finalized upload intents must retain their video record");
+    expect(
+      database
+        .prepare("SELECT status, taken_down_at, takedown_reason FROM videos WHERE id = ?")
+        .get(videoId),
+    ).toEqual({
+      status: "taken_down",
+      taken_down_at: 4_000,
+      takedown_reason: preservedReason,
+    });
+
+    for (const [suffix, reason] of [
+      ["nbsp", "\u00a0"],
+      ["em_space", "\u2003"],
+    ] as const) {
+      const unicodeWhitespaceVideoId = insertPublishedVideo(suffix);
+      takeDown.run(4_000, reason, unicodeWhitespaceVideoId);
+      expect(
+        database
+          .prepare("SELECT takedown_reason FROM videos WHERE id = ?")
+          .get(unicodeWhitespaceVideoId),
+      ).toEqual({ takedown_reason: reason });
+    }
   });
 
   it("restricts referenced BLOB deletion and makes purge transactions atomic", () => {
@@ -2155,11 +2585,11 @@ describe("canonical schema", () => {
 
     try {
       expect(applyMigrations(fallbackDatabase, migrationsDirectory, { fts5: false })).toEqual([
-        1, 2, 3,
+        1, 2, 3, 4, 5,
       ]);
       expect(getSearchIndexMode(fallbackDatabase)).toBe("portable");
       expect(() => {
-        assertCanonicalMigratedSchema(fallbackDatabase, migrationsDirectory, 3);
+        assertCanonicalMigratedSchema(fallbackDatabase, migrationsDirectory, 5);
       }).not.toThrow();
       database = fallbackDatabase;
       insertAgentChannel();

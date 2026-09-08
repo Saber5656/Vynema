@@ -61,7 +61,9 @@ Source Task: TSK-1260
 ### 1. Migration mechanics
 
 - Files live in `apps/api/migrations/`, named `0001_init.sql`,
-  `0002_seed_config.sql`, `0003_guard_reviewed_invariants.sql`, …
+  `0002_seed_config.sql`, `0003_guard_reviewed_invariants.sql`,
+  `0004_snapshot_review_authorization.sql`,
+  `0005_require_takedown_reason.sql`, …
 - Apply locally with the repository migration command, e.g. `pnpm --filter @vynema/api db:migrate`.
 - Migrations are forward-only. Before applying, copy the SQLite database file to a timestamped local backup; every migration ends with `-- recovery:` guidance for restore or fix-forward. Production backup/restore is deferred to #42.
 - The repository runner owns an internal `schema_migrations` ledger with the
@@ -586,12 +588,13 @@ cleanup, and rate-limit designs:
   direct inserts in terminal states and all reverse/cross-terminal transitions
   are rejected;
 - publication requires the owning intent to be `finalized` no later than
-  `published_at`, `published_at >= videos.created_at`, and an approval from a
-  currently active reviewer/admin created no later than `published_at`. Once
-  used, that approval's identity, reviewer, decision, video, and timestamp plus
-  the video's publication timestamp are immutable. A qualifying historical
-  approval cannot be inserted or transformed from a late/rejected review after
-  publication;
+  `published_at`, `published_at >= videos.created_at`, and an approval created
+  no later than `published_at`. The original v3 guard joined mutable current
+  user role/status; `0004` supersedes that authorization rule with immutable
+  decision-time evidence. Once used, the approval's identity, reviewer,
+  decision, video, and timestamp plus the video's publication timestamp are
+  immutable. A qualifying historical approval cannot be inserted or
+  transformed from a late/rejected review after publication;
 - takedown requires retained historical approval and
   `taken_down_at >= published_at`; both lifecycle timestamps are immutable after
   their transition. A later reviewer role or account-status change does not
@@ -613,9 +616,72 @@ review. The `before-restore` safety snapshot is intentionally integrity-only so
 an operator can preserve the current database even when semantic drift is the
 reason for restoring a verified candidate.
 
-### 5. TypeScript row types & repo base
+### 5. `0004_snapshot_review_authorization.sql`
 
-- `apps/api/src/lib/repo/types.ts`: one `XxxRow` type per table, field-for-field (snake_case as stored; do NOT camelCase rows — mapping to DTOs happens in routes).
+This fix-forward migration makes authorization evidence independent of mutable
+current account state:
+
+- it adds nullable `reviewer_role_at_decision`,
+  `reviewer_status_at_decision`, and `authorization_snapshot_version` fields to
+  `moderation_reviews`;
+- a new review INSERT must omit those fields. The database accepts only an
+  active `reviewer` or `admin`, captures that role plus `active` with snapshot
+  version `1`, and aborts the whole INSERT if capture does not complete;
+- every captured review row is append-only from the end of its INSERT. The
+  review id, video, reviewer, decision, reason, timestamp, and authorization
+  snapshot cannot be updated, deleted, or replaced;
+- the supported database opener enables both foreign keys and
+  `recursive_triggers`, and status/migration operations reject a connection if
+  either guard is disabled. This makes the DELETE side of `INSERT OR REPLACE`
+  run the append-only/finalized-evidence triggers, including hidden-`rowid`
+  review conflicts and video id/intent conflicts;
+- publication and takedown consult only the stored version-1 snapshot. Later
+  promotion cannot authorize an old legacy decision, while later demotion or a
+  ban does not erase a decision that was authorized when recorded;
+- existing non-public review rows migrate as the all-NULL, permanently
+  unverified legacy tuple. They cannot be backfilled and do not authorize
+  publication;
+- v3 `published` or `taken_down` rows make the migration abort because their
+  decision-time authorization cannot be reconstructed honestly. The verified
+  pre-v4 backup is retained and an operator must resolve the data rather than
+  copying current user state into history;
+- restore rejects a pre-v4 candidate containing terminal video rows before a
+  safety backup or active-database replacement.
+
+The snapshot proves the state that this SQLite database observed for the
+supplied reviewer id. It does not prove that the SQL caller was that person, and
+a trusted process with raw write access can replace triggers or forge a
+self-consistent database. That is an explicit Phase 0 trust boundary; external
+authorization attestation is tracked by
+[issue #65](https://github.com/Saber5656/Vynema/issues/65).
+
+### 6. `0005_require_takedown_reason.sql`
+
+Every `published` → `taken_down` transition must atomically store a TEXT reason
+that is nonempty after trimming ASCII TAB, LF, VT, FF, CR, and SPACE. The stored
+value is not normalized: meaningful leading/trailing whitespace and non-ASCII
+characters are preserved exactly. Non-`taken_down` rows must retain a NULL
+reason, and the transition requires the old value to be NULL so a reason cannot
+be prewritten and later mistaken for decision-time evidence. `taken_down_at`
+and `takedown_reason` are immutable after the transition, including against
+replacement with NULL or an empty string.
+
+The migration aborts if a v4 `taken_down` row has a missing, non-TEXT, or
+ASCII-whitespace-only reason, or if a non-taken-down row already contains any
+reason. It never invents or trims a historical reason. An operator may resolve
+an invalid v4 taken-down row by supplying a truthful nonblank reason before
+retrying, but the database can prove only that this is the operator-resolved
+pre-v5 value, not that v4 captured it at decision time. External historical
+attestation remains #65. The shared durable-row validator applies the v5 state
+rule to status, startup, repository backup, reset, and restore.
+
+### 7. TypeScript row types & repo base
+
+- `apps/api/src/lib/repo/types.ts`: one `XxxRow` type per table, field-for-field
+  (snake_case as stored; do NOT camelCase rows — mapping to DTOs happens in
+  routes). `ModerationReviewRow` exposes the two nullable decision-time fields
+  and `authorization_snapshot_version: 1 | null`; transient version `0` is an
+  internal trigger state and is never a valid durable row.
 - `apps/api/src/lib/repo/db.ts`: helpers `nowMs()`, `newId()` (= `crypto.randomUUID()`), `one<T>(stmt)`, `all<T>(stmt)`, and `transaction(fn)` wrapping SQLite transactions for atomic multi-statement sequences.
 - `apps/api/src/lib/repo/config.ts`: `getConfig(db): Promise<PlatformConfig>` — reads ALL rows once per request, parses booleans/ints, **throws `ConfigUnavailableError` if any expected key is missing** (fail closed; #14 depends on this).
 - The local-only test agent/channel/key fixture and `seed-local.sql` usage
@@ -624,22 +690,24 @@ reason for restoring a verified candidate.
   available. Never add private-key material or apply local fixtures to
   production.
 
-### 6. Step-by-step order
+### 8. Step-by-step order
 
 1. Write `0001_init.sql`; apply locally; fix syntax until clean. Checkpoint: the repository migration command succeeds against a newly created temporary SQLite file.
 2. Write `0002_seed_config.sql`; verify 13 config rows exist.
 3. Add `0003_guard_reviewed_invariants.sql` without editing either applied predecessor.
-4. Add row types + db helpers + `config.ts`.
-5. Tests (§7).
-6. `docs/development.md#database` section: apply/reset/inspect commands using
+4. Add `0004_snapshot_review_authorization.sql` and
+   `0005_require_takedown_reason.sql` without editing applied predecessors.
+5. Add row types + db helpers + `config.ts`.
+6. Tests (§9).
+7. `docs/development.md#database` section: apply/reset/inspect commands using
    the selected local SQLite CLI/library and backup restore. Issue #46 adds the
    separate local-fixture application and usage instructions.
 
-### 7. Tests (`apps/api/test/schema.test.ts`)
+### 9. Tests (`apps/api/test/schema.test.ts`)
 
 | Test | Assertion |
 |---|---|
-| migrations apply | all three files apply cleanly on a fresh temporary SQLite database |
+| migrations apply | all five files apply cleanly on a fresh temporary SQLite database; v3 terminal rows and invalid v4 takedown reasons fail their respective fix-forward preflights without advancing the ledger/version |
 | FK enforcement | inserting a `videos` row with unknown `agent_id` fails |
 | CHECK enforcement | invalid `videos.status` value fails; 2001-char comment body fails |
 | primary-key nullability | every single-column TEXT primary key is explicitly `NOT NULL`; representative identity, config, and audit inserts with null keys fail |
@@ -650,7 +718,7 @@ reason for restoring a verified candidate.
 | media ownership and identity | cross-intent/wrong-kind references and video metadata differing from the referenced BLOB's size/hash/MIME fail; stored media id and creation time cannot be updated |
 | BLOB storage and length | same-length TEXT content and `length(content) != size_bytes` fail; a Buffer-backed BLOB matching `size_bytes` succeeds |
 | finalization and provenance | invalid upload-intent JSON on insert/update, direct or incomplete finalization, missing/rewritten `finalized_at`, invalid/mismatched video provenance JSON, capability use after video creation, duration drift, a missing declared thumbnail binding, and finalization before the linked video fail; a completed video plus any declared thumbnail succeeds |
-| video lifecycle | `ai_generated != 1`, direct publication/rejection/takedown, publication before intent finalization or without a current reviewer/admin approval created no later than `published_at`, publication before video creation, pending-to-takedown, published-to-rejected/reverse transitions, post-publication qualifying approval insertion/transformation/deletion/rewrite, lifecycle timestamp rewrite, `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps or with `taken_down_at < published_at` fail; published-to-takedown accepts retained historical approval after a later reviewer role/status change |
+| review authorization and video lifecycle | viewer/banned reviewer decisions, client-authored/partial snapshots, durable version 0, complete review-tuple update/delete/replace, `ai_generated != 1`, direct publication/rejection/takedown, publication before intent finalization or without a version-1 decision-time reviewer/admin approval created no later than `published_at`, publication before video creation, pending-to-takedown, published-to-rejected/reverse transitions, post-publication qualifying approval insertion, lifecycle timestamp rewrite, missing/non-TEXT/ASCII-blank takedown reason, reason rewrite, `published` without a valid video BLOB/`published_at`, rejected without `rejected_at`, and taken-down without retained video BLOB/timestamps or with `taken_down_at < published_at` fail; publication/takedown accepts retained version-1 evidence after a later reviewer role/status change |
 | purge FK behavior | deleting a referenced BLOB fails; eligible rejected purge clears references and deletes same-intent BLOB in one transaction; injected failure rolls all of it back |
 | uniqueness | duplicate `agent_nonces` (agent_id, nonce) fails; duplicate `videos.intent_id` fails; duplicate `likes` PK fails |
 | search sync | both forced portable mode and runtime-selected mode keep `videos_fts` synchronized across insert/update/delete; FTS5 uses `MATCH`, portable mode uses bounded case-insensitive search |
@@ -658,9 +726,9 @@ reason for restoring a verified candidate.
 | quota integrity | non-integer/negative counters and non-integer ledger deltas fail; ledger records the identical `period_start`; daily rollover reconciles per period; double/insufficient release rolls back |
 | rate-limit integrity | non-integer or negative windows/counts fail on insert; valid rows cannot be updated to negative state |
 | transaction helper | synchronous callback failure rolls back; a Promise-like object or callable function, including throwing `then` inspection, rolls back and invalidates its connection before a resumed microtask can write outside the transaction |
-| restore preflight | incompatible migration metadata, orphaned foreign keys, non-pristine version-zero databases, migrated databases missing canonical tables/indexes/triggers, authorization timeline drift (including capability use after video creation), invalid finalized lifecycle/provenance/duration/declared-thumbnail binding, negative rate-limit state, invalid video ownership/media references, published/taken-down videos without a finalized intent and approval predating publication or with invalid publication/takedown timestamp order, active-database path/symlink/hard-link aliases, and stale portable/FTS5 search-index content are rejected without changing the active database; retained historical approval and canonical rejected-media/expired-capability cleanup states are accepted; a pristine version-zero source is accepted; a live WAL source is restored from a transactionally consistent snapshot without losing committed rows |
+| restore preflight | incompatible migration metadata, orphaned foreign keys, non-pristine version-zero databases, migrated databases missing canonical tables/indexes/triggers, authorization timeline drift (including capability use after video creation), invalid finalized lifecycle/provenance/duration/declared-thumbnail binding, negative rate-limit state, invalid video ownership/media references, pre-v4 terminal rows, invalid/absent decision-time snapshots, missing/blank takedown reasons, published/taken-down videos without a finalized intent and approval predating publication or with invalid publication/takedown timestamp order, active-database path/symlink/hard-link aliases, and stale portable/FTS5 search-index content are rejected without changing the active database; retained version-1 historical approval and canonical rejected-media/expired-capability cleanup states are accepted; a pristine version-zero source is accepted; a live WAL source is restored from a transactionally consistent snapshot without losing committed rows |
 
-### 8. Acceptance mapping & PR evidence
+### 10. Acceptance mapping & PR evidence
 
 - "Migrations can be applied in the current environment" → local step 1; production/preview migration acceptance is blocked on #42, not #21.
 - "Schema supports every entity" → §2 covers agents/keys/nonces/intents/videos/channels/comments/likes/saves/follows/reports/reviews/quota/audit (v2 naming supersedes the v1 names in the issue body; `AgentUploadIntent`→`upload_intents`, `VideoAsset`→`videos`, `StorageQuotaLedger`→`quota_ledger`+`quota_counters`).

@@ -5,6 +5,9 @@ import { dirname, resolve } from "node:path";
 import { backupDatabase, openDatabase } from "./database.js";
 import { createTimestampedBackup, getMigrationStatus, type MigrationStatus } from "./migrations.js";
 
+const REVIEW_AUTHORIZATION_SNAPSHOT_VERSION = 4;
+const TAKEDOWN_REASON_VERSION = 5;
+
 export type RestoreDatabaseOptions = {
   activeDatabasePath: string;
   backupPath: string;
@@ -46,7 +49,41 @@ function validateRestoreCandidate(path: string, migrationsDirectory: string): Mi
   const database = openDatabase(path);
 
   try {
-    return getMigrationStatus(database, migrationsDirectory);
+    const status = getMigrationStatus(database, migrationsDirectory);
+
+    if (
+      status.currentVersion > 0 &&
+      status.currentVersion < REVIEW_AUTHORIZATION_SNAPSHOT_VERSION &&
+      status.latestVersion >= REVIEW_AUTHORIZATION_SNAPSHOT_VERSION &&
+      database
+        .prepare("SELECT 1 FROM videos WHERE status IN ('published', 'taken_down') LIMIT 1")
+        .get()
+    ) {
+      throw new Error(
+        "Restore candidate has legacy published or taken-down videos without provable reviewer authorization snapshots.",
+      );
+    }
+
+    if (
+      status.currentVersion > 0 &&
+      status.currentVersion < TAKEDOWN_REASON_VERSION &&
+      status.latestVersion >= TAKEDOWN_REASON_VERSION &&
+      database
+        .prepare(
+          [
+            "SELECT 1 FROM videos WHERE (status = 'taken_down' AND (",
+            "typeof(takedown_reason) <> 'text'",
+            "OR trim(takedown_reason, char(9, 10, 11, 12, 13, 32)) = ''",
+            ")) OR (status <> 'taken_down' AND takedown_reason IS NOT NULL)",
+            "LIMIT 1",
+          ].join(" "),
+        )
+        .get()
+    ) {
+      throw new Error("Restore candidate has invalid legacy takedown reason evidence.");
+    }
+
+    return status;
   } finally {
     database.close();
   }

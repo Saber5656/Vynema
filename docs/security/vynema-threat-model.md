@@ -32,6 +32,7 @@ Issue #23 cannot be fully closed until the dependent implementation issues
 | Stored media objects and thumbnails | Must remain private until allowed publication state. |
 | Video metadata and publication state | Controls what humans can discover and view. |
 | Human sessions and roles | Must not create upload capability or bypass moderation. |
+| Moderation decisions and takedown reasons | Must retain who was authorized when a decision was recorded and why public exposure stopped, without later account changes rewriting history. |
 | Quota ledger and kill switches | Prevent cost, storage, bandwidth, and abuse escalation. |
 | Audit log | Provides accountability for security-sensitive and publication-sensitive actions. |
 | CI and repository credentials | Can mutate repository, workflow, deployment, or release state. |
@@ -56,7 +57,7 @@ Issue #23 cannot be fully closed until the dependent implementation issues
 | Upload intent to object write | Write target must be scoped, short-lived, object-specific, and quota-bound. |
 | Uploaded object to public asset | Publication service must validate state, metadata, moderation state, and quota impact before exposure. |
 | Public API to private state | Public reads must filter to published, non-revoked, non-disabled, and otherwise public content. |
-| Maintainer action to public state | Moderation, takedown, revocation, and kill switch actions must be audited. |
+| Maintainer action to public state | Moderation decisions retain immutable database-authored decision-time role/status evidence; takedowns atomically record an immutable nonblank reason rather than accepting a prewritten value; supported SQLite connections enforce recursive triggers against `REPLACE` bypass; moderation, revocation, and kill switch actions must be audited. |
 | Repository PR to release/deploy | CI must use least privilege; release, deploy, and package publish require explicit gates. |
 
 ## Launch-Blocking Threats
@@ -86,6 +87,16 @@ one of the failures above:
 - dependency scanner gaps before dependency manifests exist;
 - general rate limits that do not protect quota or cost boundaries;
 - declared-only video duration (no server-side decode), bounded by byte quotas — accepted residual; the uploaded container still receives a bounded ISO-BMFF box parse requiring consistent sizes plus `ftyp`, `moov`, and non-empty `mdat` at finalize (see `docs/design/issue-010-finalize-validation-cleanup.md` §1a).
+- a process with unrestricted raw SQLite write access is trusted in Phase 0. It
+  can disable required pragmas, remove triggers, temporarily alter user state,
+  or forge an internally consistent authorization snapshot, so database-only
+  validation detects ordinary application errors and retained-row tampering but
+  is not an external proof of who authorized a decision. A nonblank v4 reason
+  accepted after operator resolution likewise has no database-provable
+  decision-time provenance. An independent trust root, signed decision tuple,
+  key lifecycle, and historical verification are tracked by [issue
+  #65](https://github.com/Saber5656/Vynema/issues/65); no production key,
+  credential, cloud resource, or deploy is created by the local schema.
 
 ## Required Evidence Before Closing Issue #23
 
@@ -95,6 +106,8 @@ Issue #23 can close only when implementation PRs provide evidence for:
 - no-human-upload enforcement in UI and API paths;
 - object storage privacy for non-public states;
 - publication state machine tests;
+- immutable decision-time reviewer authorization and takedown-reason tests,
+  including backup/restore rejection of missing or transient evidence;
 - quota and kill-switch tests;
 - security-sensitive PR owner sign-off records;
 - review of release, deploy, package publishing, marketplace publishing, token-writing, and `id-token: write` automation if such automation exists.

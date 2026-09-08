@@ -24,6 +24,7 @@ vi.mock("node:fs", async (importOriginal) => {
 });
 
 import { backupDatabase, openDatabase, type Database } from "../src/lib/database.js";
+import { formatErrorWithCauses } from "../src/lib/error-format.js";
 
 let database: Database | undefined;
 let temporaryDirectory: string | undefined;
@@ -40,12 +41,15 @@ afterEach(() => {
 });
 
 describe("openDatabase", () => {
-  it("enables SQLite foreign-key enforcement", () => {
+  it("enables SQLite foreign-key and recursive-trigger enforcement", () => {
     temporaryDirectory = mkdtempSync(join(tmpdir(), "vynema-database-"));
     database = openDatabase(join(temporaryDirectory, "database.sqlite"));
 
     expect(database.prepare("PRAGMA foreign_keys").get()).toEqual({
       foreign_keys: 1,
+    });
+    expect(database.prepare("PRAGMA recursive_triggers").get()).toEqual({
+      recursive_triggers: 1,
     });
   });
 
@@ -109,5 +113,26 @@ describe("openDatabase", () => {
     expect(
       readdirSync(temporaryDirectory).filter((name) => name.includes(".bak.temporary-")),
     ).toEqual([]);
+  });
+});
+
+describe("formatErrorWithCauses", () => {
+  it("shows a bounded cause chain without exposing stack traces", () => {
+    const error = new Error("Migration failed after creating backup /safe/operator/path.", {
+      cause: new Error("Migration 0005_require_takedown_reason.sql failed.", {
+        cause: new Error(
+          "legacy videos require nonblank text takedown reasons only on taken-down rows",
+        ),
+      }),
+    });
+
+    expect(formatErrorWithCauses(error)).toBe(
+      [
+        "Migration failed after creating backup /safe/operator/path.",
+        "Caused by: Migration 0005_require_takedown_reason.sql failed.",
+        "Caused by: legacy videos require nonblank text takedown reasons only on taken-down rows",
+      ].join("\n"),
+    );
+    expect(formatErrorWithCauses(error)).not.toContain("at ");
   });
 });
