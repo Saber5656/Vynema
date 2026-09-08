@@ -92,10 +92,28 @@ pnpm --filter @vynema/api db:status
 ```
 
 For every migrated database, status also verifies SQLite and foreign-key
-integrity, the repository migration schema, and exact `videos`/search-index
-content parity. API startup and `db:migrate` use the same status gate, so a
-stale portable or FTS5 index fails closed before the server starts or a
-migration backup is created; these commands never rebuild the index silently.
+integrity, the repository migration schema, exact `videos`/search-index
+content parity, and the durable upload, publication, media, identity, and
+rate-limit evidence described below. API startup and all repository-aware
+database commands (`db:status`, `db:inspect`, `db:migrate`, `db:backup`,
+`db:restore`, and the pre-removal phase of `db:reset`) use this shared gate.
+A semantic mismatch therefore fails closed before the server starts, a backup
+is published, or the active database is replaced or removed; these commands
+never repair evidence or rebuild the index silently.
+
+The shared validation is synchronous and scans database pages, durable rows,
+and all retained media bytes. Hashing reads each retained media BLOB exactly
+once, so validation time is `O(database pages + durable rows + total media
+bytes)` and peak JavaScript BLOB memory is `O(largest retained BLOB)`. The
+current Node 22 `node:sqlite` API has no incremental BLOB reader; raising the
+runtime-configured media-size limits therefore also raises this validation
+memory bound and requires an operator capacity review. Validation can hold the
+SQLite read snapshot and delay writers while it runs, and repeated restore
+validation repeats the media hashing. This cost is intentional for the Phase 0
+fail-closed local database. The `before-restore` safety copy is the sole
+integrity-only exception: it must preserve the current database even when
+repository-level semantic drift is the reason for restoring a verified
+candidate.
 
 Apply pending migrations. A verified timestamped backup is created before any
 SQL runs; the command prints both the backup path and applied versions:
@@ -147,18 +165,20 @@ evidence: a later reviewer role or account-status change does not invalidate an
 approval that was valid when publication occurred. Restore also requires
 `published_at >= videos.created_at` and, for a taken-down video,
 `taken_down_at >= published_at`.
-Restore also verifies the upload claim/BLOB/use/finalize timeline, finalized
+The shared repository validation also verifies the upload
+claim/BLOB/use/finalize timeline, finalized
 video and any declared-thumbnail linkage, duration/provenance equality, media
 ownership, and nonnegative rate-limit state. Canonical cleanup remains
 restorable: a rejected finalized video may have its media reference cleared,
 and an expired capability may be absent while a finalized video still retains
-its verified BLOB. Content hashes are computed from 1 MiB query results so
-Node.js never receives a complete restored BLOB in one JavaScript allocation.
-This bounds the JavaScript result size, not SQLite's native evaluation of the
-chunk query. A restore source that is the active database through the same
-path, a symlink, or a hard link is rejected before any backup or temporary
-restore file is created.
-Restore also verifies search-index content, not only its DDL: portable mode
+its verified BLOB. Content hashes use one single-pass query per BLOB. This keeps
+total work linear and avoids the quadratic behavior of repeated SQLite
+`substr(content, ...)` queries, but Node.js receives that one complete BLOB;
+the largest retained media item is therefore the peak JavaScript allocation.
+A restore source that is the active database through the same path, a symlink,
+or a hard link is rejected before any backup or temporary restore file is
+created.
+It also verifies search-index content, not only its DDL: portable mode
 requires exact row/title/description parity with `videos`, while FTS5 runs its
 external-content `integrity-check` against `videos`. A stale index fails before
 the safety backup or active-database replacement.

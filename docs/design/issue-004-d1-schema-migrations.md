@@ -598,10 +598,20 @@ cleanup, and rate-limit designs:
   rewrite the historical approval fact;
 - rate-limit windows and counts are nonnegative on insert and update.
 
-Restore preflight independently rechecks these durable invariants, including
-publication/takedown timestamp order, accepts the two canonical cleanup states
-above, and rejects a restore source that resolves to the active database through
-an identical path, symlink, or hard link.
+One shared repository-validation gate rechecks these durable invariants,
+including publication/takedown timestamp order, for status, API startup,
+inspection, migration, repository-aware backup, reset-before-removal, and
+restore. It accepts the two canonical cleanup states above and rejects a
+restore source that resolves to the active database through an identical path,
+symlink, or hard link. Validation runs synchronously inside a rollback-only
+SQLite savepoint and costs `O(database pages + durable rows + total media
+bytes)`; relational checks run before single-pass media hashing. Node 22's
+`node:sqlite` API has no incremental BLOB reader, so each BLOB is read once and
+peak JavaScript BLOB memory is `O(largest retained BLOB)`. Raising the mutable
+media-size configuration also raises that bound and requires operator capacity
+review. The `before-restore` safety snapshot is intentionally integrity-only so
+an operator can preserve the current database even when semantic drift is the
+reason for restoring a verified candidate.
 
 ### 5. TypeScript row types & repo base
 

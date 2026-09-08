@@ -8,12 +8,14 @@ import {
   openDatabase,
   type Database,
 } from "./database.js";
+import { assertDurableRowsConsistent } from "./database-invariants.js";
 
 const MIGRATION_NAME = /^(\d{4,})_[a-z0-9][a-z0-9_-]*\.sql$/;
 const MAX_USER_VERSION = 2_147_483_647;
 const MIGRATION_LEDGER = "schema_migrations";
 const FTS5_BLOCK_START = "-- vynema:fts5:start";
 const FTS5_BLOCK_END = "-- vynema:fts5:end";
+const MIGRATION_STATUS_VALIDATION_SAVEPOINT = "migration_status_validation";
 
 const PORTABLE_SEARCH_INDEX_SQL = `
 -- The Node 22.13 Linux SQLite build does not include FTS5. Keep the same
@@ -317,35 +319,89 @@ export function getMigrationStatus(
   database: Database,
   migrationsDirectory: string,
 ): MigrationStatus {
-  assertRuntimeCompatibleSchema(database);
-  const currentVersion = readUserVersion(database);
-  assertPristineVersionZeroDatabase(database, currentVersion);
   const migrations = discoverMigrations(migrationsDirectory);
   const latestVersion = migrations.at(-1)?.version ?? 0;
+  let status: MigrationStatus | undefined;
+  let validationError: unknown;
+  const cleanupErrors: unknown[] = [];
 
-  if (currentVersion > latestVersion) {
-    throw new Error(
-      `Database user_version ${currentVersion} is newer than available migration ${latestVersion}.`,
-    );
-  }
+  database.exec(`SAVEPOINT ${MIGRATION_STATUS_VALIDATION_SAVEPOINT}`);
 
-  if (currentVersion > 0 && !migrations.some((migration) => migration.version === currentVersion)) {
-    throw new Error(`Applied migration ${currentVersion} is missing from the repository.`);
-  }
+  try {
+    assertRuntimeCompatibleSchema(database);
+    const currentVersion = readUserVersion(database);
+    assertPristineVersionZeroDatabase(database, currentVersion);
 
-  verifyAppliedMigrationMetadata(database, migrations, currentVersion);
+    if (currentVersion > latestVersion) {
+      throw new Error(
+        `Database user_version ${currentVersion} is newer than available migration ${latestVersion}.`,
+      );
+    }
 
-  if (currentVersion > 0) {
-    assertCanonicalMigratedSchema(database, migrationsDirectory, currentVersion);
+    if (
+      currentVersion > 0 &&
+      !migrations.some((migration) => migration.version === currentVersion)
+    ) {
+      throw new Error(`Applied migration ${currentVersion} is missing from the repository.`);
+    }
+
+    verifyAppliedMigrationMetadata(database, migrations, currentVersion);
     assertDatabaseIntegrity(database);
-    assertSearchIndexParity(database);
+
+    if (currentVersion > 0) {
+      assertCanonicalMigratedSchema(database, migrationsDirectory, currentVersion);
+      assertSearchIndexParity(database);
+      assertDurableRowsConsistent(database);
+    }
+
+    status = {
+      currentVersion,
+      latestVersion,
+      pendingMigrations: migrations.filter((migration) => migration.version > currentVersion),
+    };
+  } catch (error) {
+    validationError = error;
   }
 
-  return {
-    currentVersion,
-    latestVersion,
-    pendingMigrations: migrations.filter((migration) => migration.version > currentVersion),
-  };
+  try {
+    database.exec(`ROLLBACK TO ${MIGRATION_STATUS_VALIDATION_SAVEPOINT}`);
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+
+  try {
+    database.exec(`RELEASE ${MIGRATION_STATUS_VALIDATION_SAVEPOINT}`);
+  } catch (error) {
+    cleanupErrors.push(error);
+  }
+
+  if (validationError !== undefined) {
+    const errorToThrow =
+      validationError instanceof Error
+        ? validationError
+        : new Error("Migration status validation failed with a non-Error value.", {
+            cause: validationError,
+          });
+
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(
+        [errorToThrow, ...cleanupErrors],
+        "Migration status validation and savepoint cleanup failed.",
+      );
+    }
+
+    throw errorToThrow;
+  }
+
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Migration status savepoint cleanup failed.");
+  }
+
+  if (!status) {
+    throw new Error("Migration status validation completed without a result.");
+  }
+
+  return status;
 }
 
 function readMigrationSql(migration: Migration): string {

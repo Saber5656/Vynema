@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { openDatabase, type Database } from "../src/lib/database.js";
+import { assertDurableRowsConsistent } from "../src/lib/database-invariants.js";
 import { restoreDatabaseFromBackup } from "../src/lib/database-restore.js";
 import {
   applyMigrations,
@@ -33,6 +34,7 @@ let database: Database | undefined;
 let temporaryDirectory: string | undefined;
 const repositoryMigrationsDirectory = fileURLToPath(new URL("../migrations/", import.meta.url));
 const RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES = 1024 * 1024;
+const DEFAULT_MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 const RESTORE_VIDEO_BYTES = Buffer.alloc(1024, 7);
 const RESTORE_THUMBNAIL_BYTES = Buffer.alloc(4, 8);
 const RESTORE_THUMBNAIL_SHA256 = "918bd027f59087bef8e055f9b587b25486d58c606d8658d4ce7b1199274f6744";
@@ -74,6 +76,31 @@ function getCanonicalTriggerSql(target: Database, name: string): string {
   }
 
   return trigger.sql;
+}
+
+function countMediaContentReads(target: Database): {
+  database: Database;
+  getCount: () => number;
+} {
+  let count = 0;
+  const database = {
+    prepare(sql: string) {
+      const statement = target.prepare(sql);
+
+      if (!/FROM media_blobs WHERE id = \?/i.test(sql)) {
+        return statement;
+      }
+
+      return {
+        get(...parameters: Parameters<typeof statement.get>) {
+          count += 1;
+          return statement.get(...parameters);
+        },
+      } as unknown as ReturnType<Database["prepare"]>;
+    },
+  } as unknown as Database;
+
+  return { database, getCount: () => count };
 }
 
 type RestoreVideoFixtureOptions = {
@@ -577,7 +604,7 @@ describe("applyMigrations", () => {
       .prepare("SELECT version, name, sha256, applied_at FROM schema_migrations ORDER BY version")
       .all();
 
-    const expectPreflightFailure = (expectedCause: string): void => {
+    const expectPreflightFailure = (expectedStatusError: string): void => {
       let migrationError: unknown;
       try {
         applyMigrations(fixture.database, repositoryMigrationsDirectory);
@@ -586,12 +613,7 @@ describe("applyMigrations", () => {
       }
 
       expect(migrationError).toBeInstanceOf(Error);
-      expect((migrationError as Error).message).toBe(
-        "Migration 0003_guard_reviewed_invariants.sql failed.",
-      );
-      expect((migrationError as Error & { cause?: { message?: string } }).cause?.message).toContain(
-        expectedCause,
-      );
+      expect((migrationError as Error).message).toContain(expectedStatusError);
       expect(fixture.database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
       expect(
         fixture.database
@@ -627,7 +649,9 @@ describe("applyMigrations", () => {
         .prepare("SELECT typeof(id) AS storage FROM users WHERE github_id = ?")
         .get(9_002),
     ).toEqual({ storage: "blob" });
-    expectPreflightFailure("legacy v2 identity keys must use text storage");
+    expectPreflightFailure(
+      "Database table users has a primary key value that does not use TEXT storage.",
+    );
     expect(
       fixture.database
         .prepare("SELECT typeof(id) AS storage FROM users WHERE github_id = ?")
@@ -639,7 +663,7 @@ describe("applyMigrations", () => {
       .prepare("UPDATE upload_intents SET status = 'created', finalized_at = NULL WHERE id = ?")
       .run(intentId);
     fixture.database.prepare("UPDATE videos SET published_at = ? WHERE id = ?").run(900, videoId);
-    expectPreflightFailure("legacy v2 publication rows violate v3 invariants");
+    expectPreflightFailure("published or taken down without retained approval evidence");
     expect(
       fixture.database
         .prepare(
@@ -660,7 +684,7 @@ describe("applyMigrations", () => {
     fixture.database
       .prepare("UPDATE upload_intents SET provenance_json = ? WHERE id = ?")
       .run("not-json", intentId);
-    expectPreflightFailure("legacy v2 upload rows violate v3 invariants");
+    expectPreflightFailure("invalid intent provenance binding");
     expect(
       fixture.database
         .prepare(
@@ -675,7 +699,7 @@ describe("applyMigrations", () => {
     fixture.database
       .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
       .run("legacy:negative", -1, -1);
-    expectPreflightFailure("legacy v2 rate-limit rows violate v3 invariants");
+    expectPreflightFailure("Database rate-limit key legacy:negative has negative state.");
     expect(
       fixture.database
         .prepare("SELECT window_start, count FROM rate_limits WHERE key = ?")
@@ -905,6 +929,116 @@ describe("applyMigrations", () => {
     expect(
       readdirSync(fixtureDirectory).filter((name) => name.includes(".bak.temporary-")),
     ).toEqual([]);
+  });
+
+  it("rejects durable-row drift before startup or repository backup can publish it", async () => {
+    const fixture = createFixture();
+    const fixtureDirectory = temporaryDirectory;
+
+    if (!fixtureDirectory) {
+      throw new Error("Temporary migration directory was not created.");
+    }
+
+    const databasePath = join(fixtureDirectory, "database.sqlite");
+    const startupBackupDirectory = join(fixtureDirectory, "startup-backups");
+    const manualBackupDirectory = join(fixtureDirectory, "manual-durable-backups");
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+    const { reviewId } = insertPublishedVideoWithApproval(fixture.database);
+    const approvalDeleteTriggerSql = getCanonicalTriggerSql(
+      fixture.database,
+      "moderation_review_publication_delete_v3",
+    );
+    fixture.database.exec("DROP TRIGGER moderation_review_publication_delete_v3");
+    fixture.database.prepare("DELETE FROM moderation_reviews WHERE id = ?").run(reviewId);
+    fixture.database.exec(approvalDeleteTriggerSql);
+    const sourceBytesBefore = readFileSync(databasePath);
+
+    expect(() => getMigrationStatus(fixture.database, repositoryMigrationsDirectory)).toThrow(
+      "published or taken down without retained approval evidence",
+    );
+    await expect(
+      applyMigrationsWithBackup(
+        fixture.database,
+        databasePath,
+        repositoryMigrationsDirectory,
+        startupBackupDirectory,
+      ),
+    ).rejects.toThrow("published or taken down without retained approval evidence");
+    expect(existsSync(startupBackupDirectory)).toBe(false);
+    expect(existsSync(databasePath)).toBe(true);
+
+    await expect(
+      createTimestampedBackup(fixture.database, databasePath, {
+        backupDirectory: manualBackupDirectory,
+        now: new Date("2026-08-30T00:02:00.000Z"),
+        validation: { kind: "repository", migrationsDirectory: repositoryMigrationsDirectory },
+      }),
+    ).rejects.toThrow("published or taken down without retained approval evidence");
+
+    expect(readFileSync(databasePath)).toEqual(sourceBytesBefore);
+    expect(readdirSync(manualBackupDirectory)).toEqual([]);
+    expect(
+      readdirSync(fixtureDirectory).filter((name) => name.includes(".bak.temporary-")),
+    ).toEqual([]);
+  });
+
+  it("preserves an outer transaction and releases status-validation savepoints", () => {
+    const fixture = createFixture();
+    expect(
+      applyMigrations(fixture.database, repositoryMigrationsDirectory, { fts5: false }),
+    ).toEqual([1, 2, 3]);
+    const { videoId } = insertPublishedVideoWithApproval(fixture.database);
+    const video = fixture.database
+      .prepare("SELECT rowid, title FROM videos WHERE id = ?")
+      .get(videoId) as { rowid: number; title: string };
+
+    fixture.database.exec("BEGIN IMMEDIATE");
+    expect(getMigrationStatus(fixture.database, repositoryMigrationsDirectory)).toMatchObject({
+      currentVersion: 3,
+      latestVersion: 3,
+      pendingMigrations: [],
+    });
+    expect(() => {
+      fixture.database.exec("ROLLBACK TO migration_status_validation");
+    }).toThrow("no such savepoint");
+    fixture.database
+      .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+      .run("transaction:success", 1, 1);
+    fixture.database.exec("ROLLBACK");
+    expect(
+      fixture.database
+        .prepare("SELECT key FROM rate_limits WHERE key = ?")
+        .get("transaction:success"),
+    ).toBeUndefined();
+
+    fixture.database.exec("BEGIN IMMEDIATE");
+    fixture.database
+      .prepare("UPDATE videos_fts SET title = ? WHERE rowid = ?")
+      .run("Stale transactional title", video.rowid);
+    expect(() => getMigrationStatus(fixture.database, repositoryMigrationsDirectory)).toThrow(
+      "Database search index contents do not match videos.",
+    );
+    expect(() => {
+      fixture.database.exec("ROLLBACK TO migration_status_validation");
+    }).toThrow("no such savepoint");
+    fixture.database
+      .prepare("INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)")
+      .run("transaction:failure", 1, 1);
+    fixture.database.exec("ROLLBACK");
+
+    expect(
+      fixture.database.prepare("SELECT title FROM videos_fts WHERE rowid = ?").get(video.rowid),
+    ).toEqual({ title: video.title });
+    expect(
+      fixture.database
+        .prepare("SELECT key FROM rate_limits WHERE key = ?")
+        .get("transaction:failure"),
+    ).toBeUndefined();
+    expect(getMigrationStatus(fixture.database, repositoryMigrationsDirectory)).toMatchObject({
+      currentVersion: 3,
+      latestVersion: 3,
+      pendingMigrations: [],
+    });
   });
 
   it("rejects an incompatible restore candidate without replacing the active database", async () => {
@@ -1201,11 +1335,9 @@ describe("applyMigrations", () => {
         tamperingCase.tamper(candidate);
         candidate.exec(triggerSql);
         tamperingCase.assertBlobStorage(candidate);
-        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-          currentVersion: 3,
-          latestVersion: 3,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+          `Database table ${tamperingCase.tableName} has a primary key value that does not use TEXT storage.`,
+        );
       } finally {
         candidate.close();
       }
@@ -1218,7 +1350,7 @@ describe("applyMigrations", () => {
           migrationsDirectory: repositoryMigrationsDirectory,
         }),
       ).rejects.toThrow(
-        `Restore candidate table ${tamperingCase.tableName} has a primary key value that does not use TEXT storage.`,
+        `Database table ${tamperingCase.tableName} has a primary key value that does not use TEXT storage.`,
       );
 
       expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
@@ -1265,11 +1397,9 @@ describe("applyMigrations", () => {
       expect(candidate.prepare("SELECT COUNT(*) AS count FROM moderation_reviews").get()).toEqual({
         count: 0,
       });
-      expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-        currentVersion: 3,
-        latestVersion: 3,
-        pendingMigrations: [],
-      });
+      expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+        "published or taken down without retained approval evidence",
+      );
     } finally {
       candidate.close();
     }
@@ -1355,11 +1485,9 @@ describe("applyMigrations", () => {
         .prepare("UPDATE videos SET status = 'taken_down', taken_down_at = ? WHERE id = ?")
         .run(2_900, videoId);
       invalidTimeline.exec(takedownTriggerSql);
-      expect(getMigrationStatus(invalidTimeline, repositoryMigrationsDirectory)).toMatchObject({
-        currentVersion: 3,
-        latestVersion: 3,
-        pendingMigrations: [],
-      });
+      expect(() => getMigrationStatus(invalidTimeline, repositoryMigrationsDirectory)).toThrow(
+        "published or taken down without retained approval evidence",
+      );
     } finally {
       invalidTimeline.close();
     }
@@ -1571,11 +1699,9 @@ describe("applyMigrations", () => {
         candidate.exec("DROP TRIGGER videos_finalized_evidence_immutable_v3");
         causalTimelineCase.tamper(candidate);
         candidate.exec(finalizedEvidenceTriggerSql);
-        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-          currentVersion: 3,
-          latestVersion: 3,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+          causalTimelineCase.expectedViolation,
+        );
       } finally {
         candidate.close();
       }
@@ -1657,7 +1783,7 @@ describe("applyMigrations", () => {
       },
       {
         candidateName: "stale-video-blob-metadata.sqlite",
-        expectedViolation: "has invalid finalized lifecycle evidence",
+        expectedViolation: "invalid video blob binding",
         tamper: (candidate) => {
           candidate
             .prepare("UPDATE videos SET size_bytes = size_bytes + 1 WHERE id = ?")
@@ -1676,11 +1802,9 @@ describe("applyMigrations", () => {
         tamperingCase.tamper(candidate);
         candidate.exec(mediaReferenceTriggerSql);
         candidate.exec(finalizedEvidenceTriggerSql);
-        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-          currentVersion: 3,
-          latestVersion: 3,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+          tamperingCase.expectedViolation,
+        );
       } finally {
         candidate.close();
       }
@@ -1706,7 +1830,35 @@ describe("applyMigrations", () => {
     }
   });
 
-  it("hashes restored media blobs in bounded chunks and rejects boundary or tail tampering", async () => {
+  it("validates a media blob at the default video-size limit", () => {
+    const fixture = createFixture();
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+    insertFinalizedVideo(fixture.database, {
+      videoBytes: Buffer.alloc(DEFAULT_MAX_VIDEO_BYTES, 6),
+    });
+
+    expect(getMigrationStatus(fixture.database, repositoryMigrationsDirectory)).toMatchObject({
+      currentVersion: 3,
+      latestVersion: 3,
+      pendingMigrations: [],
+    });
+  }, 20_000);
+
+  it("reads each media blob only once while validating its digest", () => {
+    const fixture = createFixture();
+    expect(applyMigrations(fixture.database, repositoryMigrationsDirectory)).toEqual([1, 2, 3]);
+    insertFinalizedVideo(fixture.database, {
+      videoBytes: Buffer.alloc(2 * RESTORE_MEDIA_BLOB_HASH_CHUNK_BYTES + 17, 6),
+    });
+    const instrumented = countMediaContentReads(fixture.database);
+
+    expect(() => {
+      assertDurableRowsConsistent(instrumented.database);
+    }).not.toThrow();
+    expect(instrumented.getCount()).toBe(1);
+  });
+
+  it("hashes each restored media blob once and rejects boundary or tail tampering", async () => {
     const fixture = createFixture();
     const fixtureDirectory = temporaryDirectory;
 
@@ -1794,11 +1946,9 @@ describe("applyMigrations", () => {
           .prepare("UPDATE media_blobs SET content = ? WHERE id = ?")
           .run(tamperedVideoBytes, blobId);
         candidate.exec(mediaBlobImmutableTriggerSql);
-        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-          currentVersion: 3,
-          latestVersion: 3,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+          `Database media blob ${blobId} content does not match its SHA-256 metadata.`,
+        );
       } finally {
         candidate.close();
       }
@@ -1811,7 +1961,7 @@ describe("applyMigrations", () => {
           migrationsDirectory: repositoryMigrationsDirectory,
         }),
       ).rejects.toThrow(
-        `Restore candidate media blob ${blobId} content does not match its SHA-256 metadata.`,
+        `Database media blob ${blobId} content does not match its SHA-256 metadata.`,
       );
 
       expect(readFileSync(databasePath)).toEqual(activeBytesBefore);
@@ -2117,7 +2267,7 @@ describe("applyMigrations", () => {
       {
         candidateName: "non-finalized-intent-with-video.sqlite",
         droppedTriggers: ["upload_intent_finalized_immutable_v3"],
-        expectedViolation: "has invalid finalized lifecycle evidence",
+        expectedViolation: "published or taken down without retained approval evidence",
         tamper: (candidate) => {
           candidate
             .prepare(
@@ -2145,7 +2295,7 @@ describe("applyMigrations", () => {
       {
         candidateName: "video-provenance-mismatch.sqlite",
         droppedTriggers: ["videos_finalized_evidence_immutable_v3", "videos_provenance_update_v3"],
-        expectedViolation: "has invalid finalized lifecycle evidence",
+        expectedViolation: "invalid intent provenance binding",
         tamper: (candidate) => {
           candidate
             .prepare("UPDATE videos SET provenance_json = ? WHERE intent_id = ?")
@@ -2180,11 +2330,9 @@ describe("applyMigrations", () => {
           }
           candidate.exec(triggerSql);
         }
-        expect(getMigrationStatus(candidate, repositoryMigrationsDirectory)).toMatchObject({
-          currentVersion: 3,
-          latestVersion: 3,
-          pendingMigrations: [],
-        });
+        expect(() => getMigrationStatus(candidate, repositoryMigrationsDirectory)).toThrow(
+          tamperingCase.expectedViolation,
+        );
       } finally {
         candidate.close();
       }
