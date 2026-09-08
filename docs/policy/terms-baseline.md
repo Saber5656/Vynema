@@ -5,6 +5,10 @@
 > hosted-service agreement. Vynema has no public hosted service or production
 > release.
 
+This is a wording and implementation baseline only. It does not claim that the
+described account, moderation, or hosted-service paths already exist, and
+accepting it does not activate terms or launch a service.
+
 ## Pre-alpha Status, Warranty, and Service Level
 
 Vynema is experimental, may change without preserving compatibility, and is not

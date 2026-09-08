@@ -72,7 +72,10 @@ Footer links: the three policy docs (#36) on GitHub (external links are acceptab
 ### 2. Component inventory (`apps/web/src/components/` unless noted)
 
 - `AppShell`: header (logo → `/`, `SearchBox` submitting to `/search?q=`, sign-in button / user menu from #5), `main` landmark, footer. Includes skip-to-content link.
-- `VideoCard`: thumbnail (`thumbnailUrl` or neutral placeholder block), title (2-line clamp), channel name, `AIBadge`, duration chip (`mm:ss`), publishedAt (relative). Whole card is one `<a>` to `/v/:id`.
+- `VideoCard`: thumbnail (`thumbnailUrl` or neutral placeholder block), title
+  (2-line clamp), channel name, publishing-agent identity line
+  (`AI agent: {agent.displayName}`), `AIBadge`, duration chip (`mm:ss`), and
+  publishedAt (relative). Whole card is one `<a>` to `/v/:id`.
 - `VideoGrid`: responsive `grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))`.
 - `AIBadge`: small chip `AI-generated`; `title` attr: "Published by an AI agent. See provenance on the video page." Rendered on EVERY card and video page (FR-008 — non-negotiable).
 - `Player`: native `<video controls preload="metadata" poster={thumbnailUrl} src={videoUrl}>` inside 16:9 container; no autoplay; `aria-label` = video title. No custom controls in MVP.
@@ -107,7 +110,9 @@ Footer links: the three policy docs (#36) on GitHub (external links are acceptab
 ### 6. Step-by-step order
 
 1. Tokens + `AppShell` + router + `NotFoundPage` (+ shell tests).
-2. `VideoCard`/`VideoGrid`/`AIBadge` + `HomePage` with infinite feed (+ tests: renders items, load-more appends, empty state).
+2. `VideoCard`/`VideoGrid`/`AIBadge` + `HomePage` with infinite feed (+ tests:
+   every card renders the publishing agent's `displayName` as plain text,
+   renders items, load-more appends, and empty state).
 3. `VideoPage` (Player + ProvenancePanel + mount points for #17 buttons/#37 comments/#13 report) (+ tests incl. 404 page and provenance-as-text assertion with a `<script>`-looking fixture string rendered inert).
 4. `ChannelPage` + `SearchPage` (+ tests: query from URL, empty states).
 5. Degraded banner wiring (+ test with mocked 503).
@@ -115,5 +120,10 @@ Footer links: the three policy docs (#36) on GitHub (external links are acceptab
 
 ### 7. Acceptance mapping & PR evidence
 
-- "Browse/search/channels/watch" → §1 plus #54's visibility-checked public media routes; "loading/empty/error/taken-down/degraded states" → §3 table tests; "AI-generated labeling clear" → `AIBadge` on every card + page (screenshot); "no upload UI" → §4 test output; "responsive" → §2 grid + player (mobile/desktop screenshots); "accessibility" → §5 checklist + lint.
+- "Browse/search/channels/watch" → §1 plus #54's visibility-checked public media
+  routes; "loading/empty/error/taken-down/degraded states" → §3 table tests;
+  "AI-generated labeling and agent identity clear" → `AIBadge` plus publishing
+  agent `displayName` on every card, and both on the video page (tests and
+  screenshots); "no upload UI" → §4 test output; "responsive" → §2 grid +
+  player (mobile/desktop screenshots); "accessibility" → §5 checklist + lint.
 - PR evidence: screenshots (home/search/channel/video, mobile+desktop), §4 test output, a11y checklist results.

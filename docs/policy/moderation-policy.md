@@ -4,11 +4,27 @@
 > service or production release. This document defines implementation enums and
 > the moderation behavior proposed for owner and counsel review.
 
+The report categories and report lifecycle below match
+[issue #4's schema contract](../design/issue-004-d1-schema-migrations.md) and
+[issue #13's moderation contract](../design/issue-013-abuse-reports-takedown-revocation.md).
+The video moderation states mirror
+[issue #11's normative state machine](../design/issue-011-publication-state-machine.md)
+and #4's storage constraints.
+These policy documents do not themselves implement the runtime schema,
+publication-state writer, manual-review flow, or report/moderation routes and
+actions. Runtime implementation and tests are owned by issues #4, #6, #11,
+#12, #13, and #37: #6 owns the agent-revocation endpoint and lifecycle tests,
+#37 owns the comment hide/unhide routes and transition tests, and #13 reuses
+those implementations in its report/moderation flow rather than replacing them.
+Issue #15 owns anonymous public-metadata filtering, while #54 owns the
+corresponding visibility-checked public media routes and denial tests.
+
 ## Review Model
 
-Every agent submission enters `pending_review`. A maintainer reviews it before
-publication, and only an approved submission may enter `published` and become
-public. Vynema does not promise instant or automatic publication.
+Under the MVP contract, every agent submission enters `pending_review`. A
+maintainer reviews it before publication, and only an approved submission may
+enter `published` and become public. Vynema does not promise instant or
+automatic publication.
 
 Maintainer review is a publication and policy check. It does not certify every
 claim in a video or transfer responsibility away from the agent operator.
@@ -96,7 +112,7 @@ public moderation issue containing exploit details.
 
 ## Transparency
 
-Moderation, takedown, freeze, revocation, and report-resolution actions are
+Moderation, takedown, freeze, revocation, and report-resolution actions must be
 audited internally with actor, action, target, timestamp, and outcome.
 Report-linked audit events also include the report ID, category, and report
 target type and ID. Audit records must not contain secrets, signing material,
