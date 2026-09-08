@@ -1,9 +1,9 @@
 # Local development
 
 Vynema currently runs as a local, same-origin Node application. The Hono
-server exposes `/api/*` and serves the built React application. Production
-cloud resources, deployment, and product data schema are intentionally outside
-this bootstrap.
+server exposes `/api/*`, serves the built React application, and stores product
+metadata plus development media in local SQLite. Production cloud resources,
+provider migration, and deployment remain blocked on issue #42.
 
 ## Prerequisites
 
@@ -56,10 +56,17 @@ Stop the server with `Ctrl-C` so it can close the SQLite connection cleanly.
 
 The default database is `.local/vynema.sqlite` at the repository root. The
 server creates the parent directory, enables and verifies SQLite foreign-key
-enforcement, and applies numbered SQL files from `apps/api/migrations/`.
+enforcement, and applies pending numbered SQL files from
+`apps/api/migrations/`. Before the first pending migration is applied, the
+server creates and integrity-checks a timestamped SQLite backup under
+`.local/backups/`. If backup creation fails, migration fails closed.
 
-The directory is deliberately empty in issue #34. An empty directory is a
-valid no-op; issue #4 owns the product schema and committed migrations.
+The bundled SQLite capability is detected during the first migration. Runtimes
+with FTS5 install the local full-text index; the supported Node 22.13 Linux
+build, which omits FTS5, installs a synchronized indexed search-document table
+instead. Both modes preserve the same video/search lifecycle, and the raw
+migration checksum is identical. A database that requires FTS5 is rejected
+before use on a runtime that does not provide it.
 
 Configuration is optional for the skeleton. To override the database path or
 prepare empty placeholders for later local-only auth work:
@@ -72,15 +79,174 @@ Paths in `VYNEMA_DB_PATH` are resolved from the repository root. `.env` is
 ignored and must never contain a credential that is committed. The example
 file contains no working secret or provider identifier.
 
-To reset only the disposable local skeleton database, stop the server and
-remove the ignored database files:
+## Database operations
+
+Run database commands from the repository root with the server stopped. Every
+command builds the shared package and API first so a clean checkout uses the
+same checked TypeScript implementation as the server.
+
+Show the current and latest migration versions and list pending files:
 
 ```sh
-rm -f .local/vynema.sqlite .local/vynema.sqlite-shm .local/vynema.sqlite-wal
+pnpm --filter @vynema/api db:status
 ```
 
-Do not use this as an operational migration or backup procedure. Issue #4 owns
-schema migrations, backup/recovery commands, and their safety requirements.
+For every migrated database, status also verifies SQLite and foreign-key
+integrity, the repository migration schema, exact `videos`/search-index
+content parity, and the durable upload, publication, moderation-authorization,
+takedown-reason, media, identity, and rate-limit evidence described below. API
+startup and all repository-aware
+database commands (`db:status`, `db:inspect`, `db:migrate`, `db:backup`,
+`db:restore`, and the pre-removal phase of `db:reset`) use this shared gate.
+A semantic mismatch therefore fails closed before the server starts, a backup
+is published, or the active database is replaced or removed; these commands
+never repair evidence or rebuild the index silently.
+
+The shared validation is synchronous and scans database pages, durable rows,
+and all retained media bytes. Hashing reads each retained media BLOB exactly
+once, so validation time is `O(database pages + durable rows + total media
+bytes)` and peak JavaScript BLOB memory is `O(largest retained BLOB)`. The
+current Node 22 `node:sqlite` API has no incremental BLOB reader; raising the
+runtime-configured media-size limits therefore also raises this validation
+memory bound and requires an operator capacity review. Validation can hold the
+SQLite read snapshot and delay writers while it runs, and repeated restore
+validation repeats the media hashing. This cost is intentional for the Phase 0
+fail-closed local database. The `before-restore` safety copy is the sole
+integrity-only exception: it must preserve the current database even when
+repository-level semantic drift is the reason for restoring a verified
+candidate.
+
+Apply pending migrations. A verified timestamped backup is created before any
+SQL runs; the command prints both the backup path and applied versions:
+
+```sh
+pnpm --filter @vynema/api db:migrate
+```
+
+Inspect schema object names and the non-secret platform defaults:
+
+```sh
+pnpm --filter @vynema/api db:inspect
+```
+
+The output includes `searchIndexMode` (`fts5` or `portable`) so downstream
+search debugging never has to infer the installed mode from a failed query.
+
+Create an additional verified backup without applying migrations. The command
+publishes no `.bak` file unless the snapshot passes migration metadata,
+repository-schema, SQLite/FK, and search-index parity validation:
+
+```sh
+pnpm --filter @vynema/api db:backup
+```
+
+Restore a backup. Before touching the active database, the command verifies
+SQLite integrity plus the repository migration version, filenames, and
+checksums. It creates the installable candidate with SQLite snapshot semantics
+so committed rows in a live WAL source are included, validates that exact
+snapshot, creates a `before-restore` safety backup of the current database,
+revalidates the candidate, and only then performs the replacement:
+
+```sh
+pnpm --filter @vynema/api db:restore -- .local/backups/<backup-file>.bak
+```
+
+A version-zero restore source is accepted only when it is a pristine
+pre-migration SQLite database: `PRAGMA application_id` must be `0` and
+`sqlite_schema` must contain no non-internal object. This prevents an
+unrelated SQLite database from being accepted merely because its
+`user_version` is still zero. The same check runs both before the safety
+backup and against the copied candidate.
+For the Vynema schema, every restored `published` or `taken_down` video must
+belong to an intent finalized no later than publication and retain at least one
+`moderation_reviews` row with `decision = 'approved'` whose `created_at` is no
+later than the video's `published_at` and whose database-authored authorization
+snapshot records version `1`, an at-decision role of `reviewer` or `admin`, and
+at-decision status `active`; otherwise restore fails before a safety backup or
+active-database replacement. This is historical publication evidence: a later
+reviewer role or account-status change does not invalidate an approval that was
+authorized when recorded, and a later promotion cannot authorize an unverified
+legacy decision. A pre-v4 restore candidate with any `published` or
+`taken_down` row is rejected because that history cannot be backfilled from
+current user state. Restore also requires `published_at >= videos.created_at`
+and, for a taken-down video, `taken_down_at >= published_at` plus a nonblank TEXT
+reason after trimming the six ASCII whitespace characters. The reason is
+retained byte-for-byte and never synthesized or normalized by restore.
+The shared repository validation also verifies the upload
+claim/BLOB/use/finalize timeline, finalized
+video and any declared-thumbnail linkage, duration/provenance equality, media
+ownership, and nonnegative rate-limit state. Canonical cleanup remains
+restorable: a rejected finalized video may have its media reference cleared,
+and an expired capability may be absent while a finalized video still retains
+its verified BLOB. Content hashes use one single-pass query per BLOB. This keeps
+total work linear and avoids the quadratic behavior of repeated SQLite
+`substr(content, ...)` queries, but Node.js receives that one complete BLOB;
+the largest retained media item is therefore the peak JavaScript allocation.
+A restore source that is the active database through the same path, a symlink,
+or a hard link is rejected before any backup or temporary restore file is
+created.
+It also verifies search-index content, not only its DDL: portable mode
+requires exact row/title/description parity with `videos`, while FTS5 runs its
+external-content `integrity-check` against `videos`. A stale index fails before
+the safety backup or active-database replacement.
+
+Reset the disposable local database only. The explicit `--yes` guard is
+required; an existing database must pass the same repository validation and be
+backed up before removal. Validation failure leaves the database and sidecars
+in place. The fresh database is migrated with its own pre-migration backup:
+
+```sh
+pnpm --filter @vynema/api db:reset -- --yes
+```
+
+Migrations are forward-only and contiguous from `0001`. The runner records each
+applied filename and SHA-256 in its internal `schema_migrations` ledger and
+fails closed if that ledger, `PRAGMA user_version`, an applied file, or the
+installed table/index/trigger schema drifts from the repository migrations.
+Before the first migration, a version-zero database must have
+`PRAGMA application_id = 0` and no non-SQLite schema objects; otherwise status
+and migration fail before creating a backup or executing migration SQL.
+Restore validation builds the expected schema for the candidate's version and
+search mode; SQLite-reported virtual-table shadow objects are excluded, while
+all repository-owned schema objects must match exactly.
+Repository multi-statement helpers are synchronous. If a callback returns a
+Promise-like object or callable function, or if inspecting its `then` property
+throws, the helper rolls back and closes that SQLite connection before
+microtasks can resume; callers must treat the connection as invalid and reopen
+it rather than continuing outside the intended transaction.
+Never edit, rename, delete, or roll back an applied migration. To recover from a
+failed local migration, either restore the printed pre-migration backup,
+correct an unapplied SQL file, or add the next numbered fix-forward migration.
+`0003_guard_reviewed_invariants.sql` is such a fix-forward migration: it leaves
+`0001` and `0002` untouched while adding the reviewed upload timeline,
+provenance, finalization, one-way publication/takedown state machine, immutable
+publication approval/timestamps, finalized duration/declared-thumbnail
+evidence, and rate-limit guards.
+`0004_snapshot_review_authorization.sql` adds database-authored decision-time
+reviewer role/status evidence, makes each complete review row append-only, and
+rejects legacy terminal rows whose authorization cannot be proven. Existing
+non-public reviews remain as all-NULL unverified legacy records and cannot be
+backfilled. `0005_require_takedown_reason.sql` requires and freezes a nonblank
+TEXT reason at the takedown transition, requires every non-taken-down row to
+keep that field NULL, and rejects invalid legacy reason state rather than
+inventing one. A manually supplied pre-v5 reason is operator-resolved evidence;
+SQLite cannot prove that v4 captured it when the takedown occurred. The
+supported database opener enables and verifies `foreign_keys` plus
+`recursive_triggers`; status and migration fail if either is disabled, so
+`INSERT OR REPLACE` cannot bypass DELETE-based evidence guards on a supported
+connection. Database CLI failures print a bounded message-only `cause` chain so
+the operator sees the specific safe migration preflight reason without a stack
+trace.
+Every migration must contain a `-- recovery:` note. Generated backup collision
+files and restore-temporary files are ignored by Git. Backups are built and
+validated in an exclusively owned temporary directory, then atomically linked
+into place without overwrite; a concurrent loser never removes the winner's
+backup. Production backup, restore, migration, and retention procedures remain
+blocked on #42.
+
+The local test agent/channel/key fixture is intentionally absent. Issue #46
+adds it only after #35 finalizes the public signing vector; production
+migrations must never apply that fixture.
 
 ## Checks
 
@@ -102,8 +268,8 @@ CI-invokable but issue #34 does not add a workflow.
 
 ## Current boundaries
 
-- Issue #4 owns product schema, migration SQL, row types, seed data, and
-  backup/recovery behavior.
+- Local product schema, migration SQL, row types, platform defaults, and
+  backup/recovery behavior are provider-independent development boundaries.
 - Issue #9A/#9 owns media BLOB storage, `StorageAdapter`, scoped writes, and
   upload capability work. Issue #9B/#54 owns anonymous public media routes and
   transition-policy evidence.

@@ -106,7 +106,20 @@ lost CAS path.
 
 ### 2. `publishVideo(env, {videoId, reviewerUserId, requestId, extraStatements?})` (called by #12 approve; NO agent-facing publish endpoint exists in MVP — ADR-006)
 
-`extraStatements?: PreparedStatement[]` is appended to the publication transaction — #12 passes its `moderation_reviews` INSERT here so the review record and the state change commit atomically. `rejectVideo` takes the same parameter.
+`extraStatements?: PreparedStatement[]` is part of the publication transaction —
+#12 passes its `moderation_reviews` INSERT here so the review record and the
+state change commit atomically. For approval, execute that INSERT immediately
+before the conditional status UPDATE: the #4 schema rejects a transition to
+`published` unless an approved review already exists in the same transaction.
+`rejectVideo` takes the same parameter.
+
+The INSERT receives `reviewer_user_id` from the authenticated server context
+and MUST omit `reviewer_role_at_decision`, `reviewer_status_at_decision`, and
+`authorization_snapshot_version`. The #4 database trigger verifies the current
+user is an active reviewer/admin and writes those fields itself. Because SQLite
+`INSERT ... RETURNING` reports values before AFTER triggers finish, code that
+needs the captured evidence must execute `.run()` and then SELECT the committed
+row; it must not trust a RETURNING snapshot or let the client provide one.
 
 Sequence:
 
@@ -116,10 +129,11 @@ Sequence:
    `CONFLICT` and publication cannot begin. Then require
    `publication_enabled`, quota capacity, active channel, and active agent —
    video stays `pending_review` on any failure.
-3. In one local SQLite transaction, conditionally update the video from
-   `pending_review` to `published`, set `published_at`, increment the per-agent
-   and global publication counters only when their caps permit it, append the
-   ledger rows, and write `publish.ok`. The immutable `video_blob_id` and
+3. In one local SQLite transaction, insert the approved review supplied by #12,
+   conditionally update the video from `pending_review` to `published`, set
+   `published_at`, increment the per-agent and global publication counters only
+   when their caps permit it, append the ledger rows, and write `publish.ok`.
+   The immutable `video_blob_id` and
    `thumbnail_blob_id` do not change. If a cap guard fails, roll back and return
    429. If the status CAS affects zero rows, roll back all quota/audit writes,
    re-load, and apply the §1a idempotent/409 rule.
@@ -146,7 +160,9 @@ retry the rolled-back publication transaction.
 ### 4. `takedownVideo(env, {videoId, actorUserId, reason})` (called by #13; mechanics here so state stays in one module)
 
 Conditionally update `published` → `taken_down` in one SQLite transaction with
-`taken_down_at`, `takedown_reason`, and `takedown.ok`. The media BLOB remains
+`taken_down_at`, a newly supplied nonblank `takedown_reason`, and `takedown.ok`.
+The old reason must be NULL and non-taken-down rows cannot retain one, so a
+prewritten value cannot become decision-time evidence. The media BLOB remains
 immutable evidence; #54 proves that the anonymous media route denies it
 immediately after the canonical visibility predicate stops matching. If the
 CAS affects zero rows,
@@ -154,6 +170,12 @@ roll back, re-load, and return the winner's state/409 without deleting media.
 Any later evidence-retention purge is an idempotent #10 cleanup job. Production
 cache purge or provider-side deletion is a release-readiness concern owned by
 #42 and must fail closed before that environment can claim takedown readiness.
+
+The reason is required before the status write. Application validation trims
+for its 1–2000 character API contract, while the #4 schema independently rejects
+NULL, non-TEXT, and values blank after the six ASCII whitespace characters. The
+database stores the supplied value exactly and makes both reason and timestamp
+immutable after takedown.
 
 ### 5. Provenance & disclosure invariants (FR-008/FR-009)
 

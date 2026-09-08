@@ -41,6 +41,9 @@ coverage/
 *.db
 *.sqlite
 *.sqlite3
+*.bak
+*.bak.*
+*.restore-*
 *-journal
 *-shm
 *-wal

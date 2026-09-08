@@ -55,7 +55,7 @@ Source Task: TSK-1260
 
 ## Implementation Plan & Design (added 2026-07-02)
 
-> Normative. Prerequisites: #4 (schema + FTS5), #11 (published state exists), #14 (`public_read_enabled`), #19. This issue owns the **canonical public-visibility predicate** — every public read in the system uses it via one shared SQL fragment.
+> Normative. Prerequisites: #4 (schema + runtime-selected search index), #11 (published state exists), #14 (`public_read_enabled`), #19. This issue owns the **canonical public-visibility predicate** — every public read in the system uses it via one shared SQL fragment.
 
 ### 1. The predicate (single definition, `apps/api/src/lib/repo/public-videos.ts`)
 
@@ -105,8 +105,10 @@ ChannelDto = { id, slug, name, description, agent: {id, displayName}, followCoun
 
 ### 4. Search implementation
 
-- Sanitize `q` (FTS5 injection guard, normative): trim; split on whitespace; keep max 8 tokens; strip `"`, `'`, `(`, `)`, `*`, `:`, `^`, `-` from each token; drop empty tokens; if none remain → return empty result set WITHOUT querying. Build match string: tokens each wrapped in double quotes, joined by spaces (implicit AND): `"cats" "space"`.
-- Query: `SELECT v.* FROM videos_fts f JOIN videos v ON v.rowid = f.rowid JOIN channels c … JOIN agents a … WHERE videos_fts MATCH ? AND <PUBLIC_VIDEO_WHERE> ORDER BY v.published_at DESC, v.id DESC LIMIT ?+1` (keyset pagination same as feed; rank-ordering is post-MVP).
+- Normalize `q` before either query path (normative): trim; split on whitespace; keep max 8 tokens; strip `"`, `'`, `(`, `)`, `*`, `:`, `^`, `-` from each token; drop empty tokens; if none remain → return an empty result set without querying. Only the `fts5` path builds a match string by wrapping each token in double quotes and joining with spaces (implicit AND): `"cats" "space"`.
+- Inspect the installed search table once through #4's `getSearchIndexMode(db)` and branch only on its typed `fts5 | portable` result. Do not infer capability from the host runtime or silently retry a failed FTS5 query as portable.
+- `fts5` query: `SELECT v.* FROM videos_fts f JOIN videos v ON v.rowid = f.rowid JOIN channels c … JOIN agents a … WHERE videos_fts MATCH ? AND <PUBLIC_VIDEO_WHERE> ORDER BY v.published_at DESC, v.id DESC LIMIT ?+1` (keyset pagination same as feed; rank-ordering is post-MVP).
+- `portable` query: join the synchronized ordinary `videos_fts` table to canonical `videos` by `rowid`, then require every sanitized token to match `title` or `description` with case-insensitive `LIKE … ESCAPE '\\'`. Escape `%`, `_`, and `\\` in each bound token before surrounding it with `%`; never interpolate tokens into SQL. Keep the same visibility predicate, ordering, keyset cursor, `limit <= 50`, and eight-token ceiling so the fallback remains bounded.
 - Empty `q` param → 422; whitespace-only → empty results.
 
 ### 5. Degraded mode & headers
@@ -133,6 +135,7 @@ Fixture set (build once in a helper, reused by #12/#13/#16 tests): agents A(acti
 | pagination | 25 published fixtures, limit 10 → pages 10/10/5, no dup/no skip across boundaries (compare id sets), stable order |
 | cursor tampering | garbage cursor → 422 |
 | search injection | `q = '"* OR 1'` and `q = 'a" (b:c)'` → 200 with sane results or empty; no 500 |
+| forced portable search | apply #4 migrations with FTS5 disabled, assert `getSearchIndexMode(db) === 'portable'`, then run the same visibility, pagination, empty-query, multi-token AND, wildcard-escaping, and injection cases without `MATCH` or a 500 |
 | limit boundary | limit=50 ok; 51 → 422 |
 | kill switch | `public_read_enabled=false` → 503 on all five metadata APIs, `no-store`; #54 owns both media-route assertions |
 | public URL contract | published DTOs contain only stable public-id-derived media URL shapes; no BLOB id, intent id, capability, or provider key |
@@ -147,7 +150,7 @@ packages/shared/src/schemas/public.ts
 apps/api/test/public-api.test.ts
 ```
 
-1. Predicate + fixture helper + feed + visibility matrix tests. 2. Detail + counts + leak-scan test. 3. Channels. 4. Search (sanitizer unit tests first). 5. Degraded mode + cache headers. 6. Update `docs/security/issue-security-mapping.md` row #15.
+1. Predicate + fixture helper + feed + visibility matrix tests. 2. Detail + counts + leak-scan test. 3. Channels. 4. Search (sanitizer unit tests first, then identical FTS5 and forced-portable contract tests). 5. Degraded mode + cache headers. 6. Update `docs/security/issue-security-mapping.md` row #15.
 
 ### 8. Acceptance mapping & PR evidence
 

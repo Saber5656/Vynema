@@ -68,13 +68,21 @@ Source Task: TSK-1260
 | `GET /api/moderation/queue?cursor&limit` | — | 200 `{items: QueueItemDto[], nextCursor}` | videos `status='pending_review'`, oldest first (`created_at ASC, id ASC` — FIFO fairness), uses `idx_videos_review_queue` |
 | `GET /api/moderation/videos/:id` | — | 200 QueueItemDetailDto | any status (reviewers may inspect history) |
 | `GET /api/moderation/videos/:id/preview` | — | 200 media stream | ONLY for `pending_review` videos → else 409 `CONFLICT`. Reviewer/admin-only same-origin response resolved through `StorageAdapter`; never returns a BLOB id or transferable URL. Audit `moderation.preview_issued` (actor, videoId). |
-| `POST /api/moderation/videos/:id/approve` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]` |
+| `POST /api/moderation/videos/:id/approve` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `publishVideo` with `extraStatements = [INSERT moderation_reviews(decision:'approved', reason)]`; #11 executes the INSERT before its status CAS in the same transaction |
 | `POST /api/moderation/videos/:id/reject` | `{reason: string}` (trimmed, REQUIRED, 1–2000 after trim; whitespace-only -> 422) | 200 VideoDto | calls `rejectVideo` with the review INSERT |
 
 Approve/reject handlers trim `reason` before validation, before calling
 `publishVideo`/`rejectVideo`, and before inserting `moderation_reviews`. Missing
 or empty-after-trim reasons return 422 `VALIDATION_FAILED` before any status
 write or review insert.
+
+The request body remains `{reason}` only. The server supplies the authenticated
+reviewer id; clients cannot supply reviewer identity, decision timestamps,
+roles, account status, or authorization-snapshot fields. The review INSERT
+omits all three snapshot columns so #4 can capture the active reviewer/admin
+state inside SQLite. If the route needs to return or audit the captured fields,
+it calls `.run()` and SELECTs the row afterward because AFTER-trigger values are
+not reflected by SQLite `INSERT ... RETURNING`.
 
 `QueueItemDto`: `{videoId, title, description, durationSeconds, sizeBytes, submittedAt, agent: {id, displayName, status}, channel: {id, slug, name, status}, provenance, quota: {agentDailyIntentsUsed, agentStorageUsed}}` — quota context via #14 `getQuotaStatus` filtered per agent (gives the reviewer abuse context).
 
@@ -95,6 +103,7 @@ Pending preview uses a reviewer/admin-only same-origin route that resolves the v
 |---|---|
 | viewer requests queue / approve | 403 both |
 | reviewer approves pending video | 200; video status `published` with the same immutable BLOB reference; `moderation_reviews` row `approved` **in the same transaction**; injected rollback leaves neither review nor publish effect; audit `publish.ok` |
+| viewer/banned reviewer submits or client supplies reviewer/snapshot fields | 403/422 before the transaction where possible; #4 independently rejects an unauthorized or client-authored snapshot and leaves no review row |
 | reject without reason | 422 |
 | approve/reject with whitespace-only reason | 422 `VALIDATION_FAILED` before `publishVideo`/`rejectVideo`; no status change; no `moderation_reviews` row |
 | reject with reason | status `rejected`; review row and audit persisted; #15/#54 own public HTTP suppression assertions |

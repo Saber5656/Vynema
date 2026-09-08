@@ -92,7 +92,7 @@ contract is fixed, but its vector-consumption integration and ready PR require
 
 - [x] #2 ADRs approved & committed
 - [x] #34 Application skeleton accepted
-- [ ] #4 local SQLite schema & migrations
+- [x] #4 local SQLite schema & migrations (accepted by its delivery PR; closes on merge)
 - [ ] #19 API platform (errors / request IDs / rate limits / CORS)
 - [ ] #22 Audit writer, action registry, and metadata redaction (#22A)
 - [ ] #5 Human auth & no-human-upload boundary
@@ -137,6 +137,7 @@ stay unchecked.
 | #1 | The requirements baseline and PR #60's repository-relative ADR-index link are on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #2 | PR #41 contains the reviewed ADR baseline | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #3 | PR #61 refreshes active status, records the historical cleanup accurately, and synchronizes this tracker | PR #60 and PR #59 prerequisites are satisfied; this close-out PR itself must merge | Accepted by this close-out; checked on merge |
+| #4 | This delivery adds the canonical local SQLite migrations, repository/config primitives, schema tests, and backup/restore/fix-forward commands | This delivery PR itself must pass review and merge; production migration remains blocked on #42 | Accepted by this delivery; checked on merge |
 | #21 | PR #58 contains the checks-only CI and explicit #42 deployment block | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #34 | PR #44 contains the application skeleton; PR #59's accepted Node/pnpm design alignment is on `main` | None; Issue closed as completed on 2026-08-27 | Closed; checked |
 | #36 | PR #43 contains the three public policy documents; this close-out aligns the canonical design, requirements, status, and tracker wording | Owner acceptance of the exact remediated policy-file blobs is recorded on PR #64; this close-out PR merge remains the #36 closure gate. Counsel approval remains a #24 launch gate. Runtime evidence stays split across #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#17/#37/#54: #4/#13 own report lifecycle, #13/#17/#37 own report backend/video/comment hooks, #6/#7 own agent identity and request authorization, #8/#10 own source/provenance capture and persistence, #11/#12 own reviewed publication transitions/audit, #6/#13/#37 own moderation actions, #15/#16 own public disclosure, and #15/#54 own public metadata/media suppression | Open dependency; unchecked until this close-out PR merges |
@@ -149,7 +150,7 @@ than historical local branch names.
 
 | Lane | Current state | Publication gate |
 |---|---|---|
-| #4 local SQLite schema | Open implementation issue | Ready PR requires implementation, tests, and required role reviews |
+| #4 local SQLite schema | Implemented and validated by its delivery PR | PR merge closes #4; production provider migration remains blocked on #42 |
 | #19 API platform | Open implementation issue | Shared-surface integration still follows the dependency gates above |
 | #21 checks-only CI | PR #58 merged; Issue closed | Deployment remains blocked on #42 |
 | #38 tracker sync | Updated by the Issue #3 close-out PR | This status synchronization does not claim completion of the remaining implementation waves |
