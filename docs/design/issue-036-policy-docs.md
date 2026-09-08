@@ -31,11 +31,13 @@ issues own runtime behavior, and #24 owns launch readiness.
   to #4's DDL and #13's moderation design. Video moderation states MUST stay
   identical to #11's normative state machine and #4's storage constraints.
   Runtime code copies these values when those issues are implemented. Runtime
-  implementation and tests are independently owned by
-  #4/#6/#11/#12/#13/#37: #6 owns the agent-revocation endpoint and lifecycle
-  tests, #37 owns the comment hide/unhide routes and transition tests, and #13
-  reuses those implementations rather than replacing them. Closing #36 neither
-  implements those paths nor substitutes for their acceptance evidence.
+  implementation and tests are independently owned by their precise contracts:
+  #4/#13 own report storage and lifecycle, #4/#11/#12/#13 own video moderation
+  states, #6/#13/#37 own moderation actions, and #15/#54 own anonymous
+  metadata/media suppression evidence. #13 reuses #6's agent-revocation and
+  #37's comment-moderation implementations rather than replacing them. Closing
+  #36 neither implements those paths nor substitutes for their acceptance
+  evidence.
 
 ## Out Of Scope
 
@@ -55,8 +57,8 @@ issues own runtime behavior, and #24 owns launch readiness.
 - [x] The disclosure contract requires every published summary surface to
   carry AI-generated labeling and agent identity, while detail surfaces also
   carry generation metadata (FR-002/FR-011).
-- [ ] Owner acceptance of this pre-alpha documentation baseline is recorded on
-  the issue or close-out PR before #36 closes. Counsel review remains a
+- [ ] Fresh owner acceptance of the remediated pre-alpha documentation baseline
+  is recorded on the close-out PR before #36 closes. Counsel review remains a
   separate pre-launch gate for #24.
 
 ## Dependencies
@@ -106,9 +108,10 @@ audited; aggregate statistics may be published in the future.
    moderation contract, and video moderation states against #11's normative
    state machine and #4's storage constraints. Preserve the distinction between
    this versioned documentation contract and the runtime evidence independently
-   produced by #4/#6/#11/#12/#13/#37. #6 owns the agent-revocation endpoint and
-   lifecycle tests, #37 owns the comment hide/unhide routes and transition
-   tests, and #13 reuses those implementations rather than replacing them.
+   produced by #4/#6/#11/#12/#13/#15/#37/#54. #4/#13 own report lifecycle,
+   #11/#12 own video review transitions, #6 owns agent revocation, #37 owns
+   comment hide/unhide, #15 owns public metadata filtering, and #54 owns public
+   media-route denial evidence.
 3. Keep links and state synchronized in `README.md`,
    `docs/requirements/vynema-mvp-requirements.md`, `PROJECT-STATUS.md`, and the
    #38 tracker.
@@ -120,12 +123,13 @@ audited; aggregate statistics may be published in the future.
 
 - [x] Report category/lifecycle names grep-verified against #4/#13 and video
   moderation states against #11/#4; this documentation close-out is not
-  reported as runtime acceptance evidence for #4/#6/#11/#12/#13/#37. #13
-  reuses #6's agent-revocation and #37's comment hide/unhide implementations
-  rather than replacing them.
+  reported as runtime acceptance evidence for #4/#6/#11/#12/#13/#15/#37/#54.
+  Ownership remains split across report lifecycle, video review transitions,
+  moderation actions, public metadata filtering, and public media-route denial.
 - [x] README, requirements, project status, and #38 tracker links/state are
   synchronized by the close-out change.
-- [ ] Owner acceptance comment linked before issue closure.
+- [ ] Fresh owner acceptance comment for the remediated policy-file version is
+  linked before issue closure.
 
 ## Close-out Audit (2026-08-27)
 
@@ -133,7 +137,8 @@ PR #43 merged only the three public policy documents. It did not itself
 implement #4's SQLite schema, #6's agent-revocation endpoint and lifecycle
 tests, #11's publication-state writer, #12's manual-review flow, #13's
 report/moderation routes, #37's comment hide/unhide routes and transition tests,
-or #15/#16's public disclosure surfaces. #13 reuses the #6/#37 implementations
+or #15/#16's public disclosure surfaces. It also did not implement #54's
+visibility-checked public media routes. #13 reuses the #6/#37 implementations
 rather than replacing them. Those issues independently own their runtime tests
 and acceptance evidence.
 
@@ -141,15 +146,16 @@ and acceptance evidence.
 |---|---|---|
 | AI disclosure | `docs/policy/ai-content-disclosure.md`; FR-002 and FR-011 | Documentation contract complete; #15/#16 runtime evidence remains downstream |
 | Pre-alpha terms | `docs/policy/terms-baseline.md` | Baseline wording complete; not operative hosted-service terms |
-| Report categories and lifecycle states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#12/#13/#37 independently own the corresponding runtime implementation and tests |
+| Report categories and lifecycle states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#13 independently own the corresponding storage, transitions, and tests |
 | Video moderation states | `docs/policy/moderation-policy.md`; #11 state machine; #4 DDL | Exact values aligned; #4/#11/#12/#13 independently own the corresponding runtime implementation and tests |
 | Moderation actions and transparency | `docs/policy/moderation-policy.md` | Required sections complete; #6 owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment hide/unhide routes and transition tests, and #13 reuses those implementations rather than replacing them; no runtime behavior or release is claimed |
-| Owner/legal gate | Issue or close-out PR comment; #24 launch checklist | Owner accepts the documentation baseline before #36 closes; counsel review remains required before hosted launch |
+| Public visibility after moderation | #15 public predicate; #54 public media routes | #15 owns anonymous metadata suppression and #54 owns taken-down/disabled/revoked/frozen media-route denial evidence |
+| Owner/legal gate | PR #64 owner-acceptance comment; #24 launch checklist | Fresh owner acceptance of the remediated policy-file version is required before #36 closes; counsel review remains required before hosted launch |
 
 Closing #36 therefore accepts the versioned pre-alpha policy documentation
 only. It does not approve a release, deploy a service, create legal obligations,
 or satisfy the runtime acceptance criteria owned by #4, #6, #11, #12, #13,
-#15, #16, or #37.
+#15, #16, #37, or #54.
 
 ---
 Stable Issue Key: AIT-MVP-028

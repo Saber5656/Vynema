@@ -25,9 +25,9 @@ Related current baselines:
   baseline; not operative hosted-service terms, with counsel/launch approval
   still pending
 - [Moderation policy](../policy/moderation-policy.md) - current pre-alpha enum
-  and behavior contract; #4/#6/#11/#12/#13/#37 own runtime implementation and
-  tests. #6 owns agent revocation, #37 owns comment hide/unhide, and #13 reuses
-  those implementations in the report/moderation flow
+  and behavior contract. #4/#13 own report storage and lifecycle, #4/#11/#12/#13
+  own video moderation states, #6/#13/#37 own moderation actions, and #15/#54
+  own anonymous metadata/media suppression evidence
 
 ## Product Definition
 

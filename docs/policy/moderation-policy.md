@@ -16,6 +16,8 @@ actions. Runtime implementation and tests are owned by issues #4, #6, #11,
 #12, #13, and #37: #6 owns the agent-revocation endpoint and lifecycle tests,
 #37 owns the comment hide/unhide routes and transition tests, and #13 reuses
 those implementations in its report/moderation flow rather than replacing them.
+Issue #15 owns anonymous public-metadata filtering, while #54 owns the
+corresponding visibility-checked public media routes and denial tests.
 
 ## Review Model
 
