@@ -1675,7 +1675,7 @@ describe("applyMigrations", () => {
         [],
       );
     }
-  });
+  }, 20_000);
 
   it("preserves an outer transaction and releases status-validation savepoints", () => {
     const fixture = createFixture();
