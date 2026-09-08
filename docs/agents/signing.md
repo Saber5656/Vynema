@@ -38,6 +38,24 @@ The private key is never printed, and existing key files are never overwritten. 
 file outside the checkout, do not attach it to issues or logs, and do not send it to Vynema. Only
 the public SPKI base64 and derived key ID are registered with the platform.
 
+On a trusted local POSIX filesystem that round-trips Unix mode bits, `keygen` rechecks the resolved
+output directory as mode `0700`. It exclusively reserves both regular, single-link output files
+without following symlinks, hardens and verifies their descriptor modes (`0600` private, `0644`
+public) and identities, then writes the public key before writing the private key. It verifies that
+each final path still identifies the reserved inode before returning. If creation, hardening,
+writing, or verification fails, cleanup checks each path's device/inode identity immediately
+before removing it. Pre-existing files are never overwritten, and a replacement inode observed by
+that check is not removed.
+
+An incomplete-cleanup error lists paths that require manual inspection and warns when private key
+material may remain; inspect and remove only the affected generated artifacts before retrying.
+If descriptor closure fails persistently, the error also requires terminating the process before
+manual inspection because an open descriptor may still retain private material. Mode-bit and
+path-identity checks do not prove restrictive ACL or network/share semantics. The identity check
+and path-based unlink are not one atomic operation, so they also do not protect a replacement made
+by another process running as the same local user in that final interval. Use a private local
+filesystem and keep its parent directories and local account trusted.
+
 The current reference CLI fails closed on Windows before reading or creating private-key files.
 Node's POSIX `mode` option cannot establish or verify a restrictive Windows ACL, so `keygen`,
 `sign`, and `test-vectors generate` are unavailable there until an ACL implementation can prove

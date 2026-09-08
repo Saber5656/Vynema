@@ -34,10 +34,11 @@ upload/finalize/status CLI is the split child #56 (#35U).
 
 ## Acceptance Criteria
 
-- [ ] On supported POSIX systems, `keygen` creates an Ed25519 keypair with private mode 0600 and
-      never prints private material. On Windows, every command that reads or creates a private key
-      fails closed before key access until restrictive ACL setup and verification are implemented;
-      public-only vector verification remains available.
+- [ ] On a trusted local POSIX filesystem that round-trips Unix mode bits, `keygen` exclusively
+      reserves identity-checked regular files, creates an Ed25519 keypair with private mode 0600,
+      and never prints private material. On Windows, every command that reads or creates a private
+      key fails closed before key access until restrictive ACL setup and verification are
+      implemented; public-only vector verification remains available.
 - [ ] `sign` produces canonical headers byte-for-byte compatible with #7.
 - [ ] `test-vectors verify` deterministically validates every field and signature in
       `docs/agents/signing-test-vectors.json` using public inputs and keys only.
@@ -88,6 +89,13 @@ tools/agent-cli/
   verify a restrictive Windows ACL; `keygen`, `sign`, and private-key-backed vector replacement
   stay unavailable there until an ACL implementation proves exclusive access.
 - Never log or transmit the private key. Add an explicit unit test asserting `sign` output contains no key material.
+- Reserve private/public files with exclusive, no-follow descriptor opens before writing either
+  payload. Verify descriptor mode, regular-file/link count, and device/inode identity; write public
+  material first and private material last. On failure, close all descriptors and remove only
+  invocation-created paths whose identity still matches. Report any residual path and warn that
+  private material or descriptor may remain. These checks do not prove ACL/share semantics. The
+  identity check and path unlink are not atomic, so the local account and parent directories remain
+  trusted boundaries; a same-user process can race that final interval.
 
 ### 3. Signing (`signing.ts`) — mirror of #7
 

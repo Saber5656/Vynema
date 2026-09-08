@@ -1,22 +1,34 @@
+import { spawnSync } from "node:child_process";
 import { createHash, generateKeyPairSync, verify as verifyBytes } from "node:crypto";
 import {
   chmodSync,
+  closeSync,
   existsSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   realpathSync,
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { runCli, type CliIo } from "../src/cli.js";
+import { isCliEntryPoint, runCli, type CliIo } from "../src/cli.js";
+import {
+  installKeyFileSecurityOperationsForTest,
+  type KeyFileSecurityOperations,
+} from "../src/internal/key-file-security.js";
 import {
   assertPathOutsideRepository,
   deriveKeyIdFromSpki,
@@ -88,6 +100,58 @@ function firstVector(vectors: SigningVector[]): SigningVector {
     throw new Error("Expected at least one signing vector in the test fixture.");
   }
   return vector;
+}
+
+const nativeKeyFileSecurityOperations: KeyFileSecurityOperations = {
+  chmodSync,
+  closeSync,
+  fchmodSync,
+  fstatSync,
+  lstatSync,
+  openSync,
+  unlinkSync,
+  writeFileSync: (fileDescriptor, data) => {
+    writeFileSync(fileDescriptor, data);
+  },
+};
+
+function keyFileSecurityOperations(
+  overrides: Partial<KeyFileSecurityOperations>,
+): KeyFileSecurityOperations {
+  return { ...nativeKeyFileSecurityOperations, ...overrides };
+}
+
+function generateAgentKeyFilesWithOperations(
+  outputDirectory: string,
+  operations: KeyFileSecurityOperations,
+): void {
+  const restore = installKeyFileSecurityOperationsForTest(operations);
+  try {
+    generateAgentKeyFiles(outputDirectory);
+  } finally {
+    restore();
+  }
+}
+
+type KeyFileSecurityStats = ReturnType<KeyFileSecurityOperations["lstatSync"]>;
+
+function withMode(stats: KeyFileSecurityStats, mode: number): KeyFileSecurityStats {
+  return {
+    dev: stats.dev,
+    ino: stats.ino,
+    mode,
+    nlink: stats.nlink,
+    size: stats.size,
+    isDirectory: () => stats.isDirectory(),
+    isFile: () => stats.isFile(),
+    isSymbolicLink: () => stats.isSymbolicLink(),
+  };
+}
+
+function keyFileDataText(data: string | NodeJS.ArrayBufferView): string {
+  return typeof data === "string"
+    ? data
+    : Buffer.from(data.buffer, data.byteOffset, data.byteLength).toString("utf8");
 }
 
 afterEach(() => {
@@ -244,8 +308,11 @@ describe("Ed25519 key handling and CLI", () => {
     expect(captured.stderr.join("")).toBe("");
     const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
     const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    expect(statSync(outputDirectory).mode & 0o777).toBe(0o700);
     expect(statSync(privateKeyPath).mode & 0o777).toBe(0o600);
-    expect(statSync(publicKeyPath).isFile()).toBe(true);
+    expect(statSync(publicKeyPath).mode & 0o777).toBe(0o644);
+    expect(lstatSync(privateKeyPath).isSymbolicLink()).toBe(false);
+    expect(lstatSync(publicKeyPath).isSymbolicLink()).toBe(false);
 
     const privateKey = loadEd25519PrivateKey(privateKeyPath);
     const privatePem = readFileSync(privateKeyPath, "utf8");
@@ -258,6 +325,365 @@ describe("Ed25519 key handling and CLI", () => {
     expect(visibleOutput).not.toContain(privatePem);
     expect(visibleOutput).not.toContain(privateDer);
     expect(visibleOutput).not.toContain(privatePemMarker);
+  });
+
+  it.each([PRIVATE_KEY_FILENAME, PUBLIC_KEY_FILENAME])(
+    "removes both newly generated key files when %s hardening fails",
+    (filename) => {
+      const temporaryDirectory = makeTemporaryDirectory("keygen-hardening-failure");
+      const outputDirectory = join(temporaryDirectory, "keys");
+      const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+      const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+
+      const descriptorPaths = new Map<number, string>();
+
+      expect(() => {
+        generateAgentKeyFilesWithOperations(
+          outputDirectory,
+          keyFileSecurityOperations({
+            openSync: (path, flags, mode) => {
+              const fileDescriptor = openSync(path, flags, mode);
+              descriptorPaths.set(fileDescriptor, path);
+              return fileDescriptor;
+            },
+            fchmodSync: (fileDescriptor, mode) => {
+              if (descriptorPaths.get(fileDescriptor)?.endsWith(filename)) {
+                throw new Error(`simulated ${filename} chmod failure`);
+              }
+              fchmodSync(fileDescriptor, mode);
+            },
+          }),
+        );
+      }).toThrow(new RegExp(`simulated ${filename} chmod failure`));
+
+      expect(existsSync(privateKeyPath)).toBe(false);
+      expect(existsSync(publicKeyPath)).toBe(false);
+    },
+  );
+
+  it.each([
+    [PRIVATE_KEY_FILENAME, 0o100644, "0600"],
+    [PUBLIC_KEY_FILENAME, 0o100600, "0644"],
+  ])("removes generated files when %s mode cannot be verified", (filename, mode, expectedMode) => {
+    const temporaryDirectory = makeTemporaryDirectory(`keygen-${filename}-mode-verification`);
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const descriptorPaths = new Map<number, string>();
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          openSync: (path, flags, requestedMode) => {
+            const fileDescriptor = openSync(path, flags, requestedMode);
+            descriptorPaths.set(fileDescriptor, path);
+            return fileDescriptor;
+          },
+          fstatSync: (fileDescriptor) => {
+            const stats = fstatSync(fileDescriptor);
+            if (descriptorPaths.get(fileDescriptor)?.endsWith(filename)) {
+              return withMode(stats, mode);
+            }
+            return stats;
+          },
+        }),
+      );
+    }).toThrow(new RegExp(`verified as mode ${expectedMode}`));
+
+    expect(existsSync(privateKeyPath)).toBe(false);
+    expect(existsSync(publicKeyPath)).toBe(false);
+  });
+
+  it("removes a private key after a partial descriptor write fails", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-partial-private-write");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          writeFileSync: (fileDescriptor, data) => {
+            if (keyFileDataText(data).includes("PRIVATE KEY")) {
+              writeFileSync(fileDescriptor, "partial private material");
+              throw new Error("simulated partial private-key write");
+            }
+            writeFileSync(fileDescriptor, data);
+          },
+        }),
+      );
+    }).toThrow(/simulated partial private-key write/);
+
+    expect(existsSync(privateKeyPath)).toBe(false);
+    expect(existsSync(publicKeyPath)).toBe(false);
+  });
+
+  it("preserves a public-key sentinel that appears during exclusive reservation", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-public-reservation-race");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const sentinel = "do not replace this file\n";
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          openSync: (path, flags, mode) => {
+            if (path.endsWith(PUBLIC_KEY_FILENAME)) {
+              writeFileSync(path, sentinel, { flag: "wx", mode: 0o644 });
+            }
+            return openSync(path, flags, mode);
+          },
+        }),
+      );
+    }).toThrow(/Refusing to overwrite/);
+
+    expect(existsSync(privateKeyPath)).toBe(false);
+    expect(readFileSync(publicKeyPath, "utf8")).toBe(sentinel);
+  });
+
+  it("does not unlink a replacement inode while cleaning up a failed private write", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-cleanup-replacement");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const descriptorPaths = new Map<number, string>();
+    const replacement = "replacement owned by another operation\n";
+
+    let thrown: unknown;
+    try {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          openSync: (path, flags, mode) => {
+            const fileDescriptor = openSync(path, flags, mode);
+            descriptorPaths.set(fileDescriptor, path);
+            return fileDescriptor;
+          },
+          writeFileSync: (fileDescriptor, data) => {
+            const path = descriptorPaths.get(fileDescriptor);
+            if (path?.endsWith(PRIVATE_KEY_FILENAME)) {
+              writeFileSync(fileDescriptor, "partial private material");
+              unlinkSync(path);
+              writeFileSync(path, replacement, { flag: "wx", mode: 0o600 });
+              throw new Error("simulated private-key write failure after replacement");
+            }
+            writeFileSync(fileDescriptor, data);
+          },
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(AggregateError);
+    expect((thrown as Error).message).toContain("simulated private-key write failure");
+    expect((thrown as Error).message).toContain(privateKeyPath);
+    expect((thrown as Error).message).toContain("Private key material may remain");
+    expect(readFileSync(privateKeyPath, "utf8")).toBe(replacement);
+    expect(existsSync(publicKeyPath)).toBe(false);
+  });
+
+  it("retries a transient descriptor-close failure before removing generated files", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-transient-close-failure");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const descriptorPaths = new Map<number, string>();
+    let privateCloseAttempts = 0;
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          openSync: (path, flags, mode) => {
+            const fileDescriptor = openSync(path, flags, mode);
+            descriptorPaths.set(fileDescriptor, path);
+            return fileDescriptor;
+          },
+          closeSync: (fileDescriptor) => {
+            if (
+              descriptorPaths.get(fileDescriptor)?.endsWith(PRIVATE_KEY_FILENAME) &&
+              ++privateCloseAttempts === 1
+            ) {
+              throw new Error("simulated transient private descriptor close failure");
+            }
+            closeSync(fileDescriptor);
+          },
+        }),
+      );
+    }).toThrow(/simulated transient private descriptor close failure/);
+
+    expect(privateCloseAttempts).toBe(2);
+    expect(existsSync(privateKeyPath)).toBe(false);
+    expect(existsSync(publicKeyPath)).toBe(false);
+  });
+
+  it("reports a persistently unclosed descriptor and still attempts every path cleanup", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-persistent-close-failure");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const descriptorPaths = new Map<number, string>();
+    let privateFileDescriptor: number | undefined;
+    let privateCloseAttempts = 0;
+    let thrown: unknown;
+
+    try {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          openSync: (path, flags, mode) => {
+            const fileDescriptor = openSync(path, flags, mode);
+            descriptorPaths.set(fileDescriptor, path);
+            if (path.endsWith(PRIVATE_KEY_FILENAME)) {
+              privateFileDescriptor = fileDescriptor;
+            }
+            return fileDescriptor;
+          },
+          closeSync: (fileDescriptor) => {
+            if (descriptorPaths.get(fileDescriptor)?.endsWith(PRIVATE_KEY_FILENAME)) {
+              privateCloseAttempts += 1;
+              throw new Error("simulated persistent private descriptor close failure");
+            }
+            closeSync(fileDescriptor);
+          },
+        }),
+      );
+    } catch (error) {
+      thrown = error;
+    }
+
+    try {
+      expect(thrown).toBeInstanceOf(AggregateError);
+      expect((thrown as Error).message).toContain("Open key file descriptors may remain");
+      expect((thrown as Error).message).toContain("terminate this process");
+      expect(privateCloseAttempts).toBe(2);
+      expect(existsSync(privateKeyPath)).toBe(false);
+      expect(existsSync(publicKeyPath)).toBe(false);
+    } finally {
+      if (privateFileDescriptor !== undefined) {
+        closeSync(privateFileDescriptor);
+      }
+    }
+  });
+
+  it("documents the same-user replacement race between identity check and path unlink", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-unlink-race-boundary");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+    const replacement = "same-user replacement during unlink\n";
+    let raced = false;
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          writeFileSync: (fileDescriptor, data) => {
+            if (keyFileDataText(data).includes("PRIVATE KEY")) {
+              writeFileSync(fileDescriptor, "partial private material");
+              throw new Error("simulated private-key write failure");
+            }
+            writeFileSync(fileDescriptor, data);
+          },
+          unlinkSync: (path) => {
+            if (path.endsWith(PRIVATE_KEY_FILENAME) && !raced) {
+              // Interpose after the production identity check but before its path-based unlink.
+              unlinkSync(path);
+              writeFileSync(path, replacement, { flag: "wx", mode: 0o600 });
+              raced = true;
+            }
+            unlinkSync(path);
+          },
+        }),
+      );
+    }).toThrow(/simulated private-key write failure/);
+
+    expect(raced).toBe(true);
+    expect(existsSync(privateKeyPath)).toBe(false);
+    expect(existsSync(publicKeyPath)).toBe(false);
+  });
+
+  it("fails before key creation when restrictive directory mode cannot be verified", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-directory-mode-verification");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    let directoryStatCalls = 0;
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          lstatSync: (path) => {
+            const stats = lstatSync(path);
+            if (stats.isDirectory() && ++directoryStatCalls > 1) {
+              return withMode(stats, 0o040755);
+            }
+            return stats;
+          },
+        }),
+      );
+    }).toThrow(/verified as mode 0700/);
+
+    expect(existsSync(join(outputDirectory, PRIVATE_KEY_FILENAME))).toBe(false);
+    expect(existsSync(join(outputDirectory, PUBLIC_KEY_FILENAME))).toBe(false);
+  });
+
+  it("fails before key creation when output-directory hardening throws", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-directory-hardening-failure");
+    const outputDirectory = join(temporaryDirectory, "keys");
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          chmodSync: () => {
+            throw new Error("simulated directory chmod failure");
+          },
+        }),
+      );
+    }).toThrow(/simulated directory chmod failure/);
+
+    expect(existsSync(join(outputDirectory, PRIVATE_KEY_FILENAME))).toBe(false);
+    expect(existsSync(join(outputDirectory, PUBLIC_KEY_FILENAME))).toBe(false);
+  });
+
+  it("reports incomplete cleanup but still removes the public artifact", () => {
+    const temporaryDirectory = makeTemporaryDirectory("keygen-cleanup-failure");
+    const outputDirectory = join(temporaryDirectory, "keys");
+    const privateKeyPath = join(outputDirectory, PRIVATE_KEY_FILENAME);
+    const publicKeyPath = join(outputDirectory, PUBLIC_KEY_FILENAME);
+
+    expect(() => {
+      generateAgentKeyFilesWithOperations(
+        outputDirectory,
+        keyFileSecurityOperations({
+          writeFileSync: (fileDescriptor, data) => {
+            if (keyFileDataText(data).includes("PRIVATE KEY")) {
+              writeFileSync(fileDescriptor, "partial private material");
+              throw new Error("simulated private-key write failure");
+            }
+            writeFileSync(fileDescriptor, data);
+          },
+          unlinkSync: (path) => {
+            if (path.endsWith(PRIVATE_KEY_FILENAME)) {
+              throw new Error("simulated private-key cleanup failure");
+            }
+            unlinkSync(path);
+          },
+        }),
+      );
+    }).toThrow(
+      new RegExp(
+        `simulated private-key write failure.*${PRIVATE_KEY_FILENAME}.*Private key material may remain`,
+      ),
+    );
+
+    expect(existsSync(privateKeyPath)).toBe(true);
+    expect(existsSync(publicKeyPath)).toBe(false);
   });
 
   it("refuses to overwrite an existing keypair", async () => {
@@ -458,6 +884,32 @@ describe("Ed25519 key handling and CLI", () => {
     expect(() => generateAgentKeyFiles(symlinkPath)).toThrow(/outside the repository checkout/);
     expect(existsSync(join(repositoryTarget, PRIVATE_KEY_FILENAME))).toBe(false);
     expect(existsSync(join(repositoryTarget, PUBLIC_KEY_FILENAME))).toBe(false);
+  });
+
+  it("recognizes the real CLI entry point when argv uses a symlink launcher", () => {
+    const temporaryDirectory = makeTemporaryDirectory("symlinked-cli-launcher");
+    const realEntryPoint = join(temporaryDirectory, "cli.js");
+    const symlinkEntryPoint = join(temporaryDirectory, "vynema-agent");
+    writeFileSync(realEntryPoint, "// test entry point\n");
+    symlinkSync(realEntryPoint, symlinkEntryPoint, "file");
+
+    expect(isCliEntryPoint(symlinkEntryPoint, pathToFileURL(realEntryPoint).href)).toBe(true);
+  });
+
+  it("runs the built CLI through a symlink launcher", () => {
+    const temporaryDirectory = makeTemporaryDirectory("symlinked-built-cli-launcher");
+    const realEntryPoint = join(repositoryRoot, "tools/agent-cli/dist/cli.js");
+    const symlinkEntryPoint = join(temporaryDirectory, "vynema-agent");
+    symlinkSync(realEntryPoint, symlinkEntryPoint, "file");
+
+    const result = spawnSync(process.execPath, [symlinkEntryPoint, "--help"], {
+      encoding: "utf8",
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain("Usage: vynema-agent");
+    expect(result.stdout).toContain("keygen");
   });
 });
 

@@ -1,17 +1,21 @@
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync } from "node:crypto";
 import type { KeyObject } from "node:crypto";
 import {
-  chmodSync,
+  constants,
   existsSync,
   lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   statSync,
-  unlinkSync,
-  writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+
+import {
+  getKeyFileSecurityOperations,
+  type KeyFileSecurityOperations,
+  type KeyPathSecurityStats,
+} from "./internal/key-file-security.js";
 
 const ED25519_SPKI_PREFIX = Buffer.from("302a300506032b6570032100", "hex");
 
@@ -143,6 +147,276 @@ function assertPrivateKeyPlatform(): void {
   }
 }
 
+function assertSecureKeyDirectory(
+  directoryPath: string,
+  operations: KeyFileSecurityOperations,
+): void {
+  const directory = operations.lstatSync(directoryPath);
+  if (directory.isSymbolicLink() || !directory.isDirectory()) {
+    throw new Error("Key output path must resolve to a real directory.");
+  }
+  if ((directory.mode & 0o777) !== 0o700) {
+    throw new Error("Key output directory permissions could not be verified as mode 0700.");
+  }
+}
+
+interface KeyFileIdentity {
+  dev: number;
+  ino: number;
+}
+
+interface TrackedGeneratedKeyFile {
+  created: boolean;
+  expectedMode: number;
+  fileDescriptor?: number;
+  identity?: KeyFileIdentity;
+  path: string;
+}
+
+interface KeyCleanupResult {
+  errors: unknown[];
+  incompletePaths: string[];
+  openDescriptorsMayRemain: boolean;
+}
+
+const EXCLUSIVE_KEY_FILE_FLAGS =
+  constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW;
+
+function isMissingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+function isExistingPathError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "EEXIST"
+  );
+}
+
+function errorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : "Unknown key generation failure.";
+  return message.replace(/[\r\n]+/g, " ");
+}
+
+function getFileIdentity(stats: KeyPathSecurityStats): KeyFileIdentity {
+  if (!Number.isSafeInteger(stats.dev) || !Number.isSafeInteger(stats.ino)) {
+    throw new Error("Generated key file identity could not be verified.");
+  }
+  return { dev: stats.dev, ino: stats.ino };
+}
+
+function hasSameIdentity(stats: KeyPathSecurityStats, identity: KeyFileIdentity): boolean {
+  return stats.dev === identity.dev && stats.ino === identity.ino;
+}
+
+function assertRegularSingleLink(stats: KeyPathSecurityStats, label: string): void {
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(`${label} is not a regular file.`);
+  }
+  if (stats.nlink !== 1) {
+    throw new Error(`${label} must have exactly one filesystem link.`);
+  }
+}
+
+function reserveGeneratedKeyFile(
+  file: TrackedGeneratedKeyFile,
+  operations: KeyFileSecurityOperations,
+): void {
+  try {
+    file.fileDescriptor = operations.openSync(
+      file.path,
+      EXCLUSIVE_KEY_FILE_FLAGS,
+      file.expectedMode,
+    );
+    file.created = true;
+  } catch (error) {
+    if (isExistingPathError(error)) {
+      throw new Error("Refusing to overwrite an existing agent key file.", { cause: error });
+    }
+    throw error;
+  }
+
+  const descriptor = operations.fstatSync(file.fileDescriptor);
+  file.identity = getFileIdentity(descriptor);
+  assertRegularSingleLink(descriptor, "Generated key file descriptor");
+}
+
+function getGeneratedKeyFileDescriptor(file: TrackedGeneratedKeyFile): number {
+  if (file.fileDescriptor === undefined) {
+    throw new Error("Generated key file descriptor is unavailable.");
+  }
+  return file.fileDescriptor;
+}
+
+function assertGeneratedKeyDescriptorSecure(
+  file: TrackedGeneratedKeyFile,
+  operations: KeyFileSecurityOperations,
+  expectedSize?: number,
+): void {
+  if (file.fileDescriptor === undefined || file.identity === undefined) {
+    throw new Error("Generated key file descriptor identity is unavailable.");
+  }
+
+  const descriptor = operations.fstatSync(file.fileDescriptor);
+  assertRegularSingleLink(descriptor, "Generated key file descriptor");
+  if (!hasSameIdentity(descriptor, file.identity)) {
+    throw new Error("Generated key file descriptor identity changed unexpectedly.");
+  }
+  if ((descriptor.mode & 0o777) !== file.expectedMode) {
+    throw new Error(
+      `Generated key file permissions could not be verified as mode ${file.expectedMode.toString(8).padStart(4, "0")}.`,
+    );
+  }
+  if (expectedSize !== undefined && descriptor.size !== expectedSize) {
+    throw new Error("Generated key file contents could not be verified as complete.");
+  }
+}
+
+function assertGeneratedKeyPathSecure(
+  file: TrackedGeneratedKeyFile,
+  operations: KeyFileSecurityOperations,
+  expectedSize: number,
+): void {
+  if (file.identity === undefined) {
+    throw new Error("Generated key file path identity is unavailable.");
+  }
+
+  const pathStats = operations.lstatSync(file.path);
+  assertRegularSingleLink(pathStats, "Generated key path");
+  if (!hasSameIdentity(pathStats, file.identity)) {
+    throw new Error("Generated key path no longer references the reserved file.");
+  }
+  if ((pathStats.mode & 0o777) !== file.expectedMode) {
+    throw new Error(
+      `Generated key file permissions could not be verified as mode ${file.expectedMode.toString(8).padStart(4, "0")}.`,
+    );
+  }
+  if (pathStats.size !== expectedSize) {
+    throw new Error("Generated key path contents could not be verified as complete.");
+  }
+}
+
+function closeGeneratedKeyFile(
+  file: TrackedGeneratedKeyFile,
+  operations: KeyFileSecurityOperations,
+): void {
+  if (file.fileDescriptor === undefined) {
+    return;
+  }
+  operations.closeSync(file.fileDescriptor);
+  file.fileDescriptor = undefined;
+}
+
+function cleanupGeneratedKeyFiles(
+  files: readonly TrackedGeneratedKeyFile[],
+  operations: KeyFileSecurityOperations,
+): KeyCleanupResult {
+  const errors: unknown[] = [];
+  const incompletePaths = new Set<string>();
+  let openDescriptorsMayRemain = false;
+
+  for (const file of files) {
+    if (!file.created || file.fileDescriptor === undefined) {
+      continue;
+    }
+
+    if (file.identity === undefined) {
+      try {
+        file.identity = getFileIdentity(operations.fstatSync(file.fileDescriptor));
+      } catch {
+        // The path is handled conservatively below when descriptor identity is unavailable.
+      }
+    }
+
+    try {
+      closeGeneratedKeyFile(file, operations);
+    } catch (error) {
+      errors.push(error);
+      incompletePaths.add(file.path);
+      openDescriptorsMayRemain = true;
+    }
+  }
+
+  for (const file of files) {
+    if (!file.created) {
+      continue;
+    }
+
+    let pathStats: KeyPathSecurityStats;
+    try {
+      pathStats = operations.lstatSync(file.path);
+    } catch (error) {
+      if (isMissingPathError(error)) {
+        continue;
+      }
+      errors.push(error);
+      incompletePaths.add(file.path);
+      continue;
+    }
+
+    if (file.identity === undefined) {
+      errors.push(new Error(`Cannot verify ownership of generated key artifact: ${file.path}`));
+      incompletePaths.add(file.path);
+      continue;
+    }
+
+    if (!hasSameIdentity(pathStats, file.identity)) {
+      errors.push(new Error(`Generated key path was replaced before cleanup: ${file.path}`));
+      incompletePaths.add(file.path);
+      continue;
+    }
+
+    try {
+      operations.unlinkSync(file.path);
+    } catch (error) {
+      errors.push(error);
+      incompletePaths.add(file.path);
+      continue;
+    }
+
+    try {
+      operations.lstatSync(file.path);
+      errors.push(new Error(`Generated key artifact remained after cleanup: ${file.path}`));
+      incompletePaths.add(file.path);
+    } catch (error) {
+      if (!isMissingPathError(error)) {
+        errors.push(error);
+        incompletePaths.add(file.path);
+      }
+    }
+  }
+
+  return { errors, incompletePaths: [...incompletePaths], openDescriptorsMayRemain };
+}
+
+function throwAfterGeneratedKeyCleanup(
+  originalError: unknown,
+  files: readonly TrackedGeneratedKeyFile[],
+  operations: KeyFileSecurityOperations,
+): never {
+  const cleanup = cleanupGeneratedKeyFiles(files, operations);
+
+  if (cleanup.errors.length > 0) {
+    const descriptorWarning = cleanup.openDescriptorsMayRemain
+      ? " Open key file descriptors may remain; terminate this process before inspecting or removing residual artifacts."
+      : "";
+    throw new AggregateError(
+      [originalError, ...cleanup.errors],
+      `Key generation failed: ${errorMessage(originalError)} Cleanup was incomplete for ${cleanup.incompletePaths.join(", ")}. Private key material may remain.${descriptorWarning} Manually inspect and remove the affected paths before retrying.`,
+      { cause: originalError },
+    );
+  }
+
+  throw originalError;
+}
+
 export function loadEd25519PrivateKey(privateKeyPath: string): KeyObject {
   assertPrivateKeyPlatform();
 
@@ -181,6 +455,7 @@ export function generateAgentKeyFiles(
   repositoryRoot?: string,
 ): GeneratedAgentKeyPair {
   assertPrivateKeyPlatform();
+  const operations = getKeyFileSecurityOperations();
 
   const containingRepository = findRepositoryRoot(outputDirectory);
   if (containingRepository) {
@@ -194,41 +469,71 @@ export function generateAgentKeyFiles(
   const directoryExisted = existsSync(outputDirectory);
   mkdirSync(outputDirectory, { recursive: true, mode: 0o700 });
   const resolvedDirectory = realpathSync(outputDirectory);
-  const directory = statSync(resolvedDirectory);
+  const directory = operations.lstatSync(resolvedDirectory);
 
-  if (!directory.isDirectory()) {
+  if (directory.isSymbolicLink() || !directory.isDirectory()) {
     throw new Error("Key output path must be a directory.");
   }
 
   if (directoryExisted && (directory.mode & 0o077) !== 0) {
     throw new Error("Key output directory must not grant group or other access (use mode 0700).");
   }
-  chmodSync(resolvedDirectory, 0o700);
+  operations.chmodSync(resolvedDirectory, 0o700);
+  assertSecureKeyDirectory(resolvedDirectory, operations);
 
-  const privateKeyPath = join(resolvedDirectory, PRIVATE_KEY_FILENAME);
-  const publicKeyPath = join(resolvedDirectory, PUBLIC_KEY_FILENAME);
+  const privateKeyFile: TrackedGeneratedKeyFile = {
+    created: false,
+    expectedMode: 0o600,
+    path: join(resolvedDirectory, PRIVATE_KEY_FILENAME),
+  };
+  const publicKeyFile: TrackedGeneratedKeyFile = {
+    created: false,
+    expectedMode: 0o644,
+    path: join(resolvedDirectory, PUBLIC_KEY_FILENAME),
+  };
+  const generatedFiles = [privateKeyFile, publicKeyFile];
 
-  if (existsSync(privateKeyPath) || existsSync(publicKeyPath)) {
-    throw new Error("Refusing to overwrite an existing agent key file.");
-  }
-
-  const { privateKey, publicKey } = generateKeyPairSync("ed25519");
-  const privateKeyPem = privateKey.export({ format: "pem", type: "pkcs8" });
-  const publicKeyPem = publicKey.export({ format: "pem", type: "spki" });
-
-  writeFileSync(privateKeyPath, privateKeyPem, { flag: "wx", mode: 0o600 });
+  let publicKey: KeyObject;
   try {
-    writeFileSync(publicKeyPath, publicKeyPem, { flag: "wx", mode: 0o644 });
-  } catch (error) {
-    unlinkSync(privateKeyPath);
-    throw error;
-  }
+    reserveGeneratedKeyFile(privateKeyFile, operations);
+    reserveGeneratedKeyFile(publicKeyFile, operations);
 
-  chmodSync(privateKeyPath, 0o600);
+    operations.fchmodSync(
+      getGeneratedKeyFileDescriptor(privateKeyFile),
+      privateKeyFile.expectedMode,
+    );
+    assertGeneratedKeyDescriptorSecure(privateKeyFile, operations);
+    operations.fchmodSync(getGeneratedKeyFileDescriptor(publicKeyFile), publicKeyFile.expectedMode);
+    assertGeneratedKeyDescriptorSecure(publicKeyFile, operations);
+    assertSecureKeyDirectory(resolvedDirectory, operations);
+
+    const generated = generateKeyPairSync("ed25519");
+    publicKey = generated.publicKey;
+    const privateKeyPem = generated.privateKey.export({ format: "pem", type: "pkcs8" });
+    const publicKeyPem = generated.publicKey.export({ format: "pem", type: "spki" });
+    const privateKeySize = Buffer.byteLength(privateKeyPem);
+    const publicKeySize = Buffer.byteLength(publicKeyPem);
+
+    operations.writeFileSync(getGeneratedKeyFileDescriptor(publicKeyFile), publicKeyPem);
+    operations.writeFileSync(getGeneratedKeyFileDescriptor(privateKeyFile), privateKeyPem);
+
+    assertGeneratedKeyDescriptorSecure(privateKeyFile, operations, privateKeySize);
+    assertGeneratedKeyDescriptorSecure(publicKeyFile, operations, publicKeySize);
+    assertGeneratedKeyPathSecure(privateKeyFile, operations, privateKeySize);
+    assertGeneratedKeyPathSecure(publicKeyFile, operations, publicKeySize);
+    assertSecureKeyDirectory(resolvedDirectory, operations);
+
+    closeGeneratedKeyFile(privateKeyFile, operations);
+    closeGeneratedKeyFile(publicKeyFile, operations);
+    assertGeneratedKeyPathSecure(privateKeyFile, operations, privateKeySize);
+    assertGeneratedKeyPathSecure(publicKeyFile, operations, publicKeySize);
+  } catch (error) {
+    throwAfterGeneratedKeyCleanup(error, generatedFiles, operations);
+  }
 
   return {
     ...getPublicKeyIdentity(publicKey),
-    privateKeyPath,
-    publicKeyPath,
+    privateKeyPath: privateKeyFile.path,
+    publicKeyPath: publicKeyFile.path,
   };
 }

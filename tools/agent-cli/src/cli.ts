@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { Command, CommanderError } from "commander";
 
@@ -196,8 +196,22 @@ export async function runCli(
   }
 }
 
-const entryPoint = process.argv[1];
-if (entryPoint !== undefined && pathToFileURL(resolve(entryPoint)).href === import.meta.url) {
+export function isCliEntryPoint(
+  entryPoint: string | undefined = process.argv[1],
+  moduleUrl: string = import.meta.url,
+): boolean {
+  if (entryPoint === undefined) {
+    return false;
+  }
+
+  try {
+    return realpathSync(resolve(entryPoint)) === realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isCliEntryPoint()) {
   void runCli().then((exitCode) => {
     process.exitCode = exitCode;
   });
