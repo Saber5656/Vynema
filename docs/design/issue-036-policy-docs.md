@@ -32,8 +32,10 @@ issues own runtime behavior, and #24 owns launch readiness.
   identical to #11's normative state machine and #4's storage constraints.
   Runtime code copies these values when those issues are implemented. Runtime
   implementation and tests are independently owned by their precise contracts:
-  #4/#13 own report storage and lifecycle, #4/#11/#12/#13 own video moderation
-  states, and #6/#13/#37 own moderation actions. For the AI-disclosure chain,
+  #4/#13 own report storage and lifecycle, #13/#17/#37 own report
+  backend/video/comment entry-point integration, #4/#11/#12/#13 own video
+  moderation states, and #6/#13/#37 own moderation actions. For the
+  AI-disclosure chain,
   #6/#7 own registered-agent identity and signed-request authorization,
   #8/#10 own source-agent and provenance capture/persistence, #11/#12 own the
   reviewed publication state and its audit evidence, and #15/#16 own public
@@ -111,8 +113,9 @@ audited; aggregate statistics may be published in the future.
    moderation contract, and video moderation states against #11's normative
    state machine and #4's storage constraints. Preserve the distinction between
    this versioned documentation contract and the runtime evidence independently
-   produced by #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#37/#54. #4/#13 own
-   report lifecycle; #6/#7 own agent identity and signed-request authorization;
+   produced by #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#17/#37/#54. #4/#13 own
+   report lifecycle; #13/#17/#37 own report backend/video/comment entry-point
+   integration; #6/#7 own agent identity and signed-request authorization;
    #8/#10 own source-agent and provenance capture/persistence; #11/#12 own
    reviewed publication transitions and audit evidence; #6 owns agent
    revocation; #37 owns comment hide/unhide; #15/#16 own public API/UI
@@ -129,10 +132,10 @@ audited; aggregate statistics may be published in the future.
 - [x] Report category/lifecycle names grep-verified against #4/#13 and video
   moderation states against #11/#4; this documentation close-out is not
   reported as runtime acceptance evidence for
-  #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#37/#54. Ownership remains split across
-  identity/request authorization, source/provenance recording, report
-  lifecycle, video review transitions and audit, moderation actions, public
-  disclosure, metadata filtering, and public media-route denial.
+  #4/#6/#7/#8/#10/#11/#12/#13/#15/#16/#17/#37/#54. Ownership remains split
+  across identity/request authorization, source/provenance recording, report
+  entry points and lifecycle, video review transitions and audit, moderation
+  actions, public disclosure, metadata filtering, and public media-route denial.
 - [x] README, requirements, project status, and #38 tracker links/state are
   synchronized by the close-out change.
 - [x] [Fresh owner acceptance comment for the exact remediated policy-file
@@ -144,17 +147,17 @@ PR #43 merged only the three public policy documents. It did not itself
 implement #4's SQLite schema, #6's agent registry and revocation controls, #7's
 signed-request verification, #8/#10's source-agent and provenance
 capture/persistence, #11's publication-state writer and audit, #12's
-manual-review flow, #13's report/moderation routes, #37's comment hide/unhide
-routes and transition tests, or #15/#16's public disclosure surfaces. It also
-did not implement #54's visibility-checked public media routes. #13 reuses the
-#6/#37 implementations rather than replacing them. Those issues independently
-own their runtime tests and acceptance evidence.
+manual-review flow, #13's report/moderation routes, #17's video report entry
+point, #37's comment report entry and hide/unhide routes, or #15/#16's public
+disclosure surfaces. It also did not implement #54's visibility-checked public
+media routes. #13 reuses the #6/#37 implementations rather than replacing them.
+Those issues independently own their runtime tests and acceptance evidence.
 
 | Acceptance area | Repository evidence | Close-out disposition |
 |---|---|---|
 | AI disclosure | `docs/policy/ai-content-disclosure.md`; FR-002 and FR-011 | Documentation contract complete; #6/#7 own registered-agent identity and signed-request authorization, #8/#10 own source-agent and provenance capture/persistence, #11/#12 own reviewed publication-state and audit evidence, and #15/#16 own public API/UI disclosure evidence |
 | Pre-alpha terms | `docs/policy/terms-baseline.md` | Baseline wording complete; not operative hosted-service terms |
-| Report categories and lifecycle states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#13 independently own the corresponding storage, transitions, and tests |
+| Report categories and lifecycle states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#13 independently own storage/lifecycle transitions and tests, while #13/#17/#37 own backend/video/comment category-submission integration |
 | Video moderation states | `docs/policy/moderation-policy.md`; #11 state machine; #4 DDL | Exact values aligned; #4/#11/#12/#13 independently own the corresponding runtime implementation and tests |
 | Moderation actions and transparency | `docs/policy/moderation-policy.md` | Required sections complete; #6 owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment hide/unhide routes and transition tests, and #13 reuses those implementations rather than replacing them; no runtime behavior or release is claimed |
 | Public visibility after moderation | #15 public predicate; #54 public media routes | #15 owns anonymous metadata suppression and #54 owns taken-down/disabled/revoked/frozen media-route denial evidence |
@@ -163,7 +166,7 @@ own their runtime tests and acceptance evidence.
 Closing #36 therefore accepts the versioned pre-alpha policy documentation
 only. It does not approve a release, deploy a service, create legal obligations,
 or satisfy the runtime acceptance criteria owned by #4, #6, #7, #8, #10, #11,
-#12, #13, #15, #16, #37, or #54.
+#12, #13, #15, #16, #17, #37, or #54.
 
 ---
 Stable Issue Key: AIT-MVP-028

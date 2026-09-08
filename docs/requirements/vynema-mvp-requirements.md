@@ -20,14 +20,18 @@ Related current baselines:
 - `docs/security/vynema-threat-model.md`
 - `docs/security/security-contract.md`
 - [AI content disclosure](../policy/ai-content-disclosure.md) - current
-  pre-alpha documentation contract; #15/#16 own runtime evidence
+  pre-alpha documentation contract; #6/#7 own registered-agent identity and
+  signed-request authorization, #8/#10 own source-agent and provenance
+  capture/persistence, #11/#12 own reviewed publication state and audit, and
+  #15/#16 own public API/UI disclosure evidence
 - [Terms baseline](../policy/terms-baseline.md) - current pre-alpha wording
   baseline; not operative hosted-service terms, with counsel/launch approval
   still pending
 - [Moderation policy](../policy/moderation-policy.md) - current pre-alpha enum
   and behavior contract. #4/#13 own report storage and lifecycle, #4/#11/#12/#13
-  own video moderation states, #6/#13/#37 own moderation actions, and #15/#54
-  own anonymous metadata/media suppression evidence
+  own video moderation states, #13/#17/#37 own report backend/video/comment
+  entry-point integration, #6/#13/#37 own moderation actions, and #15/#54 own
+  anonymous metadata/media suppression evidence
 
 ## Product Definition
 
