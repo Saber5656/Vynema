@@ -57,9 +57,9 @@ issues own runtime behavior, and #24 owns launch readiness.
 - [x] The disclosure contract requires every published summary surface to
   carry AI-generated labeling and agent identity, while detail surfaces also
   carry generation metadata (FR-002/FR-011).
-- [ ] Fresh owner acceptance of the remediated pre-alpha documentation baseline
-  is recorded on the close-out PR before #36 closes. Counsel review remains a
-  separate pre-launch gate for #24.
+- [x] [Owner acceptance of the remediated pre-alpha documentation baseline is
+  recorded on the close-out PR](https://github.com/Saber5656/Vynema/pull/64#issuecomment-5577364441).
+  Counsel review remains a separate pre-launch gate for #24.
 
 ## Dependencies
 
@@ -128,8 +128,8 @@ audited; aggregate statistics may be published in the future.
   moderation actions, public metadata filtering, and public media-route denial.
 - [x] README, requirements, project status, and #38 tracker links/state are
   synchronized by the close-out change.
-- [ ] Fresh owner acceptance comment for the remediated policy-file version is
-  linked before issue closure.
+- [x] [Fresh owner acceptance comment for the exact remediated policy-file
+  blobs is linked](https://github.com/Saber5656/Vynema/pull/64#issuecomment-5577364441).
 
 ## Close-out Audit (2026-08-27)
 
@@ -150,7 +150,7 @@ and acceptance evidence.
 | Video moderation states | `docs/policy/moderation-policy.md`; #11 state machine; #4 DDL | Exact values aligned; #4/#11/#12/#13 independently own the corresponding runtime implementation and tests |
 | Moderation actions and transparency | `docs/policy/moderation-policy.md` | Required sections complete; #6 owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment hide/unhide routes and transition tests, and #13 reuses those implementations rather than replacing them; no runtime behavior or release is claimed |
 | Public visibility after moderation | #15 public predicate; #54 public media routes | #15 owns anonymous metadata suppression and #54 owns taken-down/disabled/revoked/frozen media-route denial evidence |
-| Owner/legal gate | PR #64 owner-acceptance comment; #24 launch checklist | Fresh owner acceptance of the remediated policy-file version is required before #36 closes; counsel review remains required before hosted launch |
+| Owner/legal gate | [PR #64 owner-acceptance comment](https://github.com/Saber5656/Vynema/pull/64#issuecomment-5577364441); #24 launch checklist | Owner accepted the exact remediated policy-file blobs; counsel review remains required before hosted launch |
 
 Closing #36 therefore accepts the versioned pre-alpha policy documentation
 only. It does not approve a release, deploy a service, create legal obligations,
