@@ -102,12 +102,13 @@ audited; aggregate statistics may be published in the future.
 1. Draft the three docs (≤ 2 pages each, plain language, no legalese pretending
    to be legal advice; include a banner: "Pre-alpha baseline. Not reviewed by
    counsel.").
-2. Cross-check enum names against #4's DDL and #13's moderation contract.
-   Preserve the distinction between this versioned documentation contract and
-   the runtime evidence independently produced by #4/#6/#11/#12/#13/#37. #6
-   owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment
-   hide/unhide routes and transition tests, and #13 reuses those implementations
-   rather than replacing them.
+2. Cross-check report category/lifecycle names against #4's DDL and #13's
+   moderation contract, and video moderation states against #11's normative
+   state machine and #4's storage constraints. Preserve the distinction between
+   this versioned documentation contract and the runtime evidence independently
+   produced by #4/#6/#11/#12/#13/#37. #6 owns the agent-revocation endpoint and
+   lifecycle tests, #37 owns the comment hide/unhide routes and transition
+   tests, and #13 reuses those implementations rather than replacing them.
 3. Keep links and state synchronized in `README.md`,
    `docs/requirements/vynema-mvp-requirements.md`, `PROJECT-STATUS.md`, and the
    #38 tracker.
@@ -117,10 +118,11 @@ audited; aggregate statistics may be published in the future.
 
 ### PR / evidence checklist
 
-- [x] Enum names grep-verified against #4/#13's canonical design contracts;
-  this documentation close-out is not reported as runtime acceptance evidence
-  for #4/#6/#11/#12/#13/#37. #13 reuses #6's agent-revocation and #37's
-  comment hide/unhide implementations rather than replacing them.
+- [x] Report category/lifecycle names grep-verified against #4/#13 and video
+  moderation states against #11/#4; this documentation close-out is not
+  reported as runtime acceptance evidence for #4/#6/#11/#12/#13/#37. #13
+  reuses #6's agent-revocation and #37's comment hide/unhide implementations
+  rather than replacing them.
 - [x] README, requirements, project status, and #38 tracker links/state are
   synchronized by the close-out change.
 - [ ] Owner acceptance comment linked before issue closure.
@@ -139,7 +141,8 @@ and acceptance evidence.
 |---|---|---|
 | AI disclosure | `docs/policy/ai-content-disclosure.md`; FR-002 and FR-011 | Documentation contract complete; #15/#16 runtime evidence remains downstream |
 | Pre-alpha terms | `docs/policy/terms-baseline.md` | Baseline wording complete; not operative hosted-service terms |
-| Report categories and states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#6/#11/#12/#13/#37 independently own the corresponding runtime implementation and tests |
+| Report categories and lifecycle states | `docs/policy/moderation-policy.md`; #4 DDL; #13 design | Exact values aligned; #4/#12/#13/#37 independently own the corresponding runtime implementation and tests |
+| Video moderation states | `docs/policy/moderation-policy.md`; #11 state machine; #4 DDL | Exact values aligned; #4/#11/#12/#13 independently own the corresponding runtime implementation and tests |
 | Moderation actions and transparency | `docs/policy/moderation-policy.md` | Required sections complete; #6 owns the agent-revocation endpoint and lifecycle tests, #37 owns the comment hide/unhide routes and transition tests, and #13 reuses those implementations rather than replacing them; no runtime behavior or release is claimed |
 | Owner/legal gate | Issue or close-out PR comment; #24 launch checklist | Owner accepts the documentation baseline before #36 closes; counsel review remains required before hosted launch |
 
