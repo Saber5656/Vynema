@@ -8,7 +8,7 @@
     "pnpm": ">=10 <11"
   },
   "scripts": {
-    "build": "pnpm --filter @vynema/shared build && pnpm --filter @vynema/web build && pnpm --filter @vynema/api build",
+    "build": "pnpm --filter @vynema/shared build && pnpm --filter @vynema/web build && pnpm --filter @vynema/api build && pnpm --filter @vynema/agent-cli build",
     "dev": "pnpm --filter @vynema/shared build && pnpm --filter @vynema/web build && pnpm --filter @vynema/api dev",
     "test": "pnpm -r test",
     "lint": "eslint .",
