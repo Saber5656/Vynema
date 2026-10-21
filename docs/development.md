@@ -7,7 +7,7 @@ provider migration, and deployment remain blocked on issue #42.
 
 ## Prerequisites
 
-- Node.js `>=22.13 <23` (`node:sqlite` is used without an experimental flag)
+- Node.js `>=22.23.4 <23` (`node:sqlite` is used without an experimental flag)
 - pnpm `10.34.5` through Corepack
 
 With `nvm` and the Corepack bundled with Node 22:
@@ -21,7 +21,7 @@ node --version
 pnpm --version
 ```
 
-The final two commands must report Node 22.13 or newer within the 22.x line and
+The final two commands must report Node 22.23.4 or newer within the 22.x line and
 pnpm 10.34.5. Do not substitute pnpm 11; the lockfile and lifecycle-script
 supply-chain boundary are tested with pnpm 10.
 
@@ -62,8 +62,7 @@ server creates and integrity-checks a timestamped SQLite backup under
 `.local/backups/`. If backup creation fails, migration fails closed.
 
 The bundled SQLite capability is detected during the first migration. Runtimes
-with FTS5 install the local full-text index; the supported Node 22.13 Linux
-build, which omits FTS5, installs a synchronized indexed search-document table
+with FTS5 install the local full-text index; Node builds that omit FTS5 install a synchronized indexed search-document table
 instead. Both modes preserve the same video/search lifecycle, and the raw
 migration checksum is identical. A database that requires FTS5 is rejected
 before use on a runtime that does not provide it.
